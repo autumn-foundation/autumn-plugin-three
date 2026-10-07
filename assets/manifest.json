@@ -1,0 +1,57 @@
+{
+  "files": {
+    "BufferGeometryUtils.js": {
+      "rewrite": "import 'three' -> './three.module.min.js'",
+      "source": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/utils/BufferGeometryUtils.js",
+      "upstream_bytes": 37621,
+      "upstream_integrity": "sha384-05mkYituMJObxUkTK7xbW9SA45DEaxOge7FQUGrhW3dsFz0fckzykM6RMAPN26rD",
+      "upstream_path": "/examples/jsm/utils/BufferGeometryUtils.js"
+    },
+    "GLTFLoader.js": {
+      "rewrite": "import 'three' -> './three.module.min.js'; '../utils/*.js' -> './*.js'",
+      "source": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/loaders/GLTFLoader.js",
+      "upstream_bytes": 114959,
+      "upstream_integrity": "sha384-3CnKaFWE2emo2DOUQi/yFm4SMemUgSZ9IAJe/V2pyJTw9KXWYSmR0MiX/7RoPyiJ",
+      "upstream_path": "/examples/jsm/loaders/GLTFLoader.js"
+    },
+    "OrbitControls.js": {
+      "rewrite": "import 'three' -> './three.module.min.js'",
+      "source": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/controls/OrbitControls.js",
+      "upstream_bytes": 40504,
+      "upstream_integrity": "sha384-4rziNxOBZKQ69i+w+f89KJ55TCYquwchVbByQwmaOeIOXdOU2PLDn3kOfXHwIJC9",
+      "upstream_path": "/examples/jsm/controls/OrbitControls.js"
+    },
+    "RoomEnvironment.js": {
+      "rewrite": "import 'three' -> './three.module.min.js'",
+      "source": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/environments/RoomEnvironment.js",
+      "upstream_bytes": 4960,
+      "upstream_integrity": "sha384-/H49oz0ZtMgJNgMZ+OhhuMuKBOsaiC3kY0/PZSvgJJXAOJJwmSBJjzlV5lJul3MB",
+      "upstream_path": "/examples/jsm/environments/RoomEnvironment.js"
+    },
+    "SkeletonUtils.js": {
+      "rewrite": "import 'three' -> './three.module.min.js'",
+      "source": "https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/utils/SkeletonUtils.js",
+      "upstream_bytes": 11535,
+      "upstream_integrity": "sha384-Pozn8j5+YFr3ak8Pm90ayqDrGYn/DV7vVs/YIIqzJhzeJT0LQksoS1fZQ5lfsYlw",
+      "upstream_path": "/examples/jsm/utils/SkeletonUtils.js"
+    },
+    "three.core.min.js": {
+      "source": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.core.min.js",
+      "upstream_bytes": 385386,
+      "upstream_integrity": "sha384-rx+KIp/9ptjArhnFAcpVoOc/ynktDsRtRJKIbC7YVKylEvFu8sgmzk9RmQ+CIV48",
+      "upstream_path": "/build/three.core.min.js"
+    },
+    "three.module.min.js": {
+      "source": "https://cdn.jsdelivr.net/npm/three@0.185.1/build/three.module.min.js",
+      "upstream_bytes": 365552,
+      "upstream_integrity": "sha384-QHQk1LzjJlJYNdthXjKCmffpDRZL3EqJ7LfqBzyKyvGgjAYM2ZVuYtFGg42NcAJ/",
+      "upstream_path": "/build/three.module.min.js"
+    }
+  },
+  "homepage": "https://threejs.org",
+  "library": "three",
+  "license": "MIT",
+  "notes": "Upstream bytes are pinned by sha384 (upstream_integrity). Addon files have import specifiers rewritten (see rewrite and scripts/vendor.sh); a test reverses the rewrites and checks upstream_integrity. init.js, parse.js and three.css are plugin-authored; autumn-web computes their URLs and SRI. This file is provenance only and is not served.",
+  "pinned": "newest release with upstream-minified builds, as of 2026-10-07 (0.186.x ships unminified builds only)",
+  "version": "0.185.1"
+}

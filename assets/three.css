@@ -1,0 +1,43 @@
+/* autumn-plugin-three default styles. */
+
+/* A scene has a size before JavaScript runs. Default: 16 / 9. */
+[data-three="scene"] {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+
+[data-three="scene"][data-three-aspect="4/3"] { aspect-ratio: 4 / 3; }
+[data-three="scene"][data-three-aspect="1/1"] { aspect-ratio: 1 / 1; }
+[data-three="scene"][data-three-aspect="21/9"] { aspect-ratio: 21 / 9; }
+[data-three="scene"][data-three-aspect="3/2"] { aspect-ratio: 3 / 2; }
+[data-three="scene"][data-three-aspect="3/4"] { aspect-ratio: 3 / 4; }
+
+/* The canvas fills the scene. */
+[data-three="scene"] > canvas[data-three-canvas] {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Declarations are data, not content. */
+[data-three-mesh],
+[data-three-model],
+[data-three-light] {
+  display: none !important;
+}
+
+/* The fallback fills the scene. It hides while the scene loads or runs. */
+[data-three="scene"] > [data-three-fallback] {
+  position: absolute;
+  inset: 0;
+}
+
+[data-three-state="loading"] > [data-three-fallback],
+[data-three-state="ready"] > [data-three-fallback] {
+  display: none;
+}
