@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { createServer } from "node:net";
 import { chromium } from "playwright";
 
-const BINARY = new URL("../../target/debug/examples/e2e_fixture", import.meta.url).pathname;
+/** Path of a built example binary. */
+const binary = (name) => new URL(`../../target/debug/examples/${name}`, import.meta.url).pathname;
 
 /** Returns a free TCP port. */
 function freePort() {
@@ -112,19 +113,22 @@ const RECORDER = () => {
 };
 
 /**
- * Starts the fixture and the browser. `env` adds environment variables.
+ * Starts an example app (default: the fixture) and the browser. `env` adds
+ * environment variables. `example` names the binary; `ready` is a path
+ * that answers when the app is up.
  * The harness writes `toml` to `autumn.toml` in a temp dir
  * (AUTUMN_MANIFEST_DIR).
  * Returns `{ base, open, close }`.
  */
-export async function start({ env = {}, toml = null } = {}) {
+export async function start({ env = {}, toml = null, example = "e2e_fixture", ready = "/basic" } = {}) {
+  const BINARY = binary(example);
   if (toml !== null) {
     const dir = mkdtempSync(join(tmpdir(), "three-e2e-"));
     writeFileSync(join(dir, "autumn.toml"), toml);
     env = { ...env, AUTUMN_MANIFEST_DIR: dir };
   }
   if (!existsSync(BINARY)) {
-    throw new Error(`missing ${BINARY}: run cargo build --example e2e_fixture`);
+    throw new Error(`missing ${BINARY}: run cargo build --example ${example}`);
   }
   const port = await freePort();
   const child = spawn(BINARY, [], {
@@ -136,7 +140,7 @@ export async function start({ env = {}, toml = null } = {}) {
   const base = `http://127.0.0.1:${port}`;
   let browser;
   try {
-    await waitForHttp(`${base}/basic`, child);
+    await waitForHttp(`${base}${ready}`, child);
     browser = await chromium.launch({
       args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--ignore-gpu-blocklist"],
     });

@@ -45,7 +45,7 @@ cargo test
 cargo llvm-cov --lib --fail-under-lines 85 --summary-only
 npm ci && npm run test:unit
 npx playwright install chromium   # one time
-cargo build --example e2e_fixture && npm run test:e2e
+cargo build --example e2e_fixture --example three_demo && npm run test:e2e
 E2E_SKIP_COVERAGE=1 node --test --test-name-pattern="<name>" tests/e2e/scene.test.mjs
 ```
 

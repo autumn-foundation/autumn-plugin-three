@@ -77,8 +77,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Build fixture app
-        run: cargo build --example e2e_fixture
+      - name: Build fixture and demo apps
+        run: cargo build --example e2e_fixture --example three_demo
       - name: Install Playwright Chromium
         run: npm ci && npx playwright install --with-deps chromium
       - name: E2E (init.js strict line coverage >= 95 %)

@@ -280,7 +280,7 @@ cargo run --example three_demo
 cargo test                                # Rust unit, property, and doc tests
 npm ci && npm run test:unit               # parse.js (node --test)
 npx playwright install chromium           # one time
-cargo build --example e2e_fixture
+cargo build --example e2e_fixture --example three_demo
 npm run test:e2e                          # Chromium + WebGL (SwiftShader)
 ```
 
