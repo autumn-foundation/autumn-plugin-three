@@ -8,8 +8,8 @@
 //!
 //! - a hero torus knot with studio light, a turntable, and orbit controls,
 //! - a GLB model viewer (auto-fit, animation clip),
-//! - an htmx gallery: each click swaps in a new scene from the server, and
-//!   the old scene is disposed,
+//! - an htmx gallery: each click gets a new scene from the server, and the
+//!   runtime disposes the old scene,
 //! - a scene written as raw `data-three-*` attributes,
 //! - custom JavaScript that uses the `three:ready` event.
 //!
@@ -150,7 +150,6 @@ fn gallery_scene(index: usize) -> Markup {
         0x00c0_84fc,
     ];
     let mesh = shapes[index % shapes.len()]
-        .clone()
         .color(Color::hex(colors[index % colors.len()]))
         .spin([20.0, 60.0, 0.0]);
     html! {

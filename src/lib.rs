@@ -1,4 +1,5 @@
-//! Three.js 3D scenes for Autumn, with Maud + htmx ergonomics.
+//! This crate adds Three.js 3D scenes to Autumn apps. It works with Maud
+//! and htmx.
 //!
 //! Add [`ThreePlugin`] to the app. Put [`three_stylesheet()`] and
 //! [`three_script()`] in the page `<head>`. Then write a [`Scene`]:
@@ -37,9 +38,10 @@
 //!
 //! # How it works
 //!
-//! - The crate vendors [Three.js](https://threejs.org) 0.185.1 (MIT) and
-//!   five addons. There is no npm and no bundler. [`THREE_ASSETS`] serves
-//!   them under `/static/_plugins/three/` with SRI hashes.
+//! - The crate contains [Three.js](https://threejs.org) 0.185.1 (MIT) and
+//!   five addons. It does not use npm or a bundler. [`THREE_ASSETS`] serves
+//!   them under `/static/_plugins/three/`. SRI covers `init.js` and the
+//!   core modules. The addons load from the same origin without SRI.
 //! - The builder renders `data-three-*` attributes. `init.js` reads them and
 //!   builds the scene. You can also write the attributes by hand.
 //! - `init.js` scans on load, on `htmx:afterSwap`, and on each DOM insertion.
@@ -49,13 +51,16 @@
 //!
 //! # Limits
 //!
-//! - WebGL only. No WebGPU renderer.
-//! - No shadows, post-processing, or physics in the declarative layer. Use
+//! - The plugin uses WebGL only. It does not support the WebGPU renderer.
+//! - The declarative layer has no shadows, post-processing, or physics. Use
 //!   the `three:ready` event for custom code.
-//! - Each scene has its own WebGL context. Browsers allow about 16 at a time.
-//! - Models: glTF 2.0 / GLB only. No Draco, KTX2, or Meshopt compression.
-//!   Images inside a GLB work under the default CSP. External model and
-//!   image URLs need a CSP that allows them.
+//! - Each scene has its own WebGL context. Browsers keep about 16 contexts.
+//!   When the browser drops a context, the scene shows its fallback.
+//! - The plugin loads only glTF 2.0 and GLB files. It does not decode
+//!   Draco, KTX2, or Meshopt compression. Images inside a GLB work with the
+//!   default CSP. External model and image URLs need a CSP that allows them.
+//! - Do not let user content keep `data-three-*` attributes. User markup
+//!   could then start scenes and load model URLs.
 
 mod assets;
 mod plugin;

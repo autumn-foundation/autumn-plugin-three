@@ -60,26 +60,31 @@ function addCoverage(entries) {
   }
 }
 
-/** Line coverage of a plugin file: `{ percent, uncovered }`. */
+/**
+ * Strict line coverage of a plugin file: `{ percent, uncovered }`. A code
+ * line counts as run only when every non-space byte on it ran. Comment and
+ * closing-bracket lines do not count.
+ */
 export function lineCoverage(name) {
   const file = coverage.get(name);
   if (!file) return null;
   let offset = 0;
   let code = 0;
+  let inComment = false;
   const uncovered = [];
   file.source.split("\n").forEach((line, index) => {
     const text = line.trim();
-    const counts = text !== "" && !text.startsWith("//") && !/^[})\];,]+$/.test(text);
-    if (counts) {
+    const comment = inComment || text.startsWith("//") || text.startsWith("/*") || text.startsWith("*");
+    if (text.startsWith("/*")) inComment = !text.includes("*/");
+    else if (inComment && text.includes("*/")) inComment = false;
+    if (text !== "" && !comment && !/^[})\];,]+$/.test(text)) {
       code += 1;
-      let run = false;
-      for (let i = offset; i < offset + line.length; i += 1) {
-        if (line[i - offset] !== " " && file.run[i]) {
-          run = true;
+      for (let i = 0; i < line.length; i += 1) {
+        if (line[i] !== " " && !file.run[offset + i]) {
+          uncovered.push(index + 1);
           break;
         }
       }
-      if (!run) uncovered.push(index + 1);
     }
     offset += line.length + 1;
   });
@@ -91,8 +96,12 @@ const RECORDER = () => {
   window.__events = [];
   window.__csp = [];
   window.__warnings = [];
+  window.__details = [];
   for (const type of ["three:ready", "three:error"]) {
-    document.addEventListener(type, (e) => window.__events.push([type, e.target.id, e.detail?.src ?? null]), true);
+    document.addEventListener(type, (e) => {
+      window.__events.push([type, e.target.id, e.detail?.src ?? null]);
+      window.__details.push(type === "three:ready" ? e.detail === e.target.autumnThree : e.detail?.error instanceof Error);
+    }, true);
   }
   document.addEventListener("securitypolicyviolation", (e) => window.__csp.push(`${e.violatedDirective} ${e.blockedURI}`));
   const warn = console.warn.bind(console);
@@ -104,7 +113,8 @@ const RECORDER = () => {
 
 /**
  * Starts the fixture and the browser. `env` adds environment variables.
- * `toml` is written as `autumn.toml` in a temp dir (AUTUMN_MANIFEST_DIR).
+ * The harness writes `toml` to `autumn.toml` in a temp dir
+ * (AUTUMN_MANIFEST_DIR).
  * Returns `{ base, open, close }`.
  */
 export async function start({ env = {}, toml = null } = {}) {
@@ -124,15 +134,17 @@ export async function start({ env = {}, toml = null } = {}) {
   let stderr = "";
   child.stderr.on("data", (d) => (stderr += d));
   const base = `http://127.0.0.1:${port}`;
+  let browser;
   try {
     await waitForHttp(`${base}/basic`, child);
+    browser = await chromium.launch({
+      args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--ignore-gpu-blocklist"],
+    });
   } catch (error) {
+    // Kill the fixture, or it keeps the test process alive.
     child.kill();
     throw new Error(`${error.message}\n${stderr}`);
   }
-  const browser = await chromium.launch({
-    args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--ignore-gpu-blocklist"],
-  });
   const contexts = [];
   const pages = [];
 

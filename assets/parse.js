@@ -1,8 +1,8 @@
 // autumn-plugin-three: attribute parsers.
 //
-// Pure functions. No Three.js, no DOM globals. init.js uses them, and
-// tests/js runs them in Node. Bad input never throws: each parser returns
-// its fallback.
+// This file has only pure functions. It does not use Three.js or DOM
+// globals. init.js uses it. tests/js runs it in Node. Bad input never
+// throws: each parser returns its fallback.
 
 /** Every attribute the plugin reads or writes. */
 export const ATTR = Object.freeze({
@@ -138,14 +138,18 @@ export function parseKeyword(value, allowed, fallback) {
   return allowed.includes(key) ? key : fallback;
 }
 
-/** Parses `w/h` to a positive ratio, else `null`. */
+/** Smallest and largest aspect ratio. Extreme ratios break the page layout. */
+export const ASPECT_RANGE = Object.freeze([0.1, 10]);
+
+/** Parses `w/h` to a ratio in `ASPECT_RANGE`, else `null`. */
 export function parseAspect(value) {
   if (typeof value !== "string") return null;
   const parts = value.split("/");
   if (parts.length !== 2) return null;
   const w = parseNumber(parts[0], NaN);
   const h = parseNumber(parts[1], NaN);
-  return w > 0 && h > 0 ? w / h : null;
+  if (!(w > 0 && h > 0)) return null;
+  return Math.min(ASPECT_RANGE[1], Math.max(ASPECT_RANGE[0], w / h));
 }
 
 /** Parses geometry sizes. Missing or bad sizes get defaults. Unknown kind: `null`. */

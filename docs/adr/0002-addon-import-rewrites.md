@@ -10,7 +10,7 @@ Three.js addons (`examples/jsm/*`) import the bare specifier `three`.
 `GLTFLoader.js` also imports `../utils/*.js`. A browser resolves a bare
 specifier only with an import map. An import map is an inline
 `<script type="importmap">`. The default Autumn CSP (`script-src 'self'`)
-blocks inline scripts. External import maps are not supported.
+blocks inline scripts. Browsers do not support external import maps.
 
 Three.js 0.186 ships no minified builds. 0.185.1 is the newest release with
 upstream-minified `three.core.min.js` and `three.module.min.js`.
@@ -22,9 +22,11 @@ upstream-minified `three.core.min.js` and `three.module.min.js`.
   rewrites only import specifiers:
   - `} from 'three';` → `} from './three.module.min.js';`
   - `'../utils/X.js'` → `'./X.js'` (flat layout).
+- `scripts/vendor.sh` stops when a rewrite does not match exactly one line.
 - `VendoredFile::rewrites` lists each rewrite. A test reverses the rewrites
-  and checks the upstream `sha384`. A second test checks that every module
-  import in the bundle resolves to a bundled file.
+  and checks the upstream `sha384`. The test also checks that each rewrite
+  changes only an import specifier to a bundled file. A second test checks
+  that every module import in the bundle resolves to a bundled file.
 
 ```mermaid
 flowchart LR

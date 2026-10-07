@@ -20,16 +20,32 @@ const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 /** Live scenes: element → state. */
 const live = new Map();
 
-/** Returns a function that calls `load` once and caches the promise. */
+/**
+ * Elements that failed, or were disposed, while in the document. Scans
+ * skip them. They build again only after they leave the document and come
+ * back, or when their declarations change.
+ */
+const parked = new WeakSet();
+
+/**
+ * Returns a function that calls `load(attempt)` once and caches the
+ * promise. After a failure, the next call tries again. The browser caches a
+ * failed module URL, so a retry must use a new URL (`?retry=n`).
+ */
 const once = (load) => {
   let promise;
-  return () => (promise ??= load());
+  let attempt = 0;
+  return () =>
+    (promise ??= load(attempt++).catch((error) => {
+      promise = undefined;
+      throw error;
+    }));
 };
 
 // Addons load only when a scene needs them.
-const loadOrbit = once(() => import("./OrbitControls.js"));
-const loadGltf = once(() => import("./GLTFLoader.js"));
-const loadRoom = once(() => import("./RoomEnvironment.js"));
+const loadOrbit = once((n) => (n ? import(`./OrbitControls.js?retry=${n}`) : import("./OrbitControls.js")));
+const loadGltf = once((n) => (n ? import(`./GLTFLoader.js?retry=${n}`) : import("./GLTFLoader.js")));
+const loadRoom = once((n) => (n ? import(`./RoomEnvironment.js?retry=${n}`) : import("./RoomEnvironment.js")));
 
 /** Geometry constructors. Arguments come from parse.js (validated sizes). */
 const GEOMETRY = {
@@ -109,6 +125,7 @@ function emit(el, type, detail) {
 /** Marks `el` as failed: fallback shows, `three:error` fires. */
 function fail(el, error, src) {
   console.warn("autumn-plugin-three:", src ?? "", error);
+  parked.add(el);
   el.setAttribute(ATTR.state, "error");
   emit(el, "three:error", { error, src });
 }
@@ -162,8 +179,9 @@ function updateLoop(state) {
   if (!run) requestRender(state);
 }
 
-/** Matches the drawing buffer and camera to the element size. */
+/** Matches the drawing buffer and camera to the element size and pixel ratio. */
 function resize(state) {
+  state.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
   const width = Math.max(1, Math.round(state.el.clientWidth));
   const height = Math.max(1, Math.round(state.el.clientHeight));
   state.renderer.setSize(width, height, false);
@@ -251,8 +269,9 @@ const BITMAP_OPTIONS = { premultiplyAlpha: "none", colorSpaceConversion: "none" 
  * GLTFLoader plugin: decodes images that a GLB embeds in a buffer view with
  * `createImageBitmap(blob)`. The stock loader fetches them from a `blob:`
  * URL, and the default Autumn CSP (`connect-src 'self'`) blocks that.
- * Other images (URLs, `data:`) use the stock path. Depends on GLTFParser
- * internals of the pinned three.js version; tests/e2e guards it.
+ * Other images (URLs, `data:`) use the stock path. This plugin uses
+ * GLTFParser internals of the pinned Three.js version. The E2E tests guard
+ * it.
  */
 function blobFreeImages(parser) {
   const stock = parser.loadImageSource.bind(parser);
@@ -267,8 +286,13 @@ function blobFreeImages(parser) {
       .then((bitmap) => {
         const texture = new THREE.Texture(bitmap);
         texture.needsUpdate = true;
+        if (source.extras && typeof source.extras === "object") Object.assign(texture.userData, source.extras);
         texture.userData.mimeType = source.mimeType;
         return texture;
+      })
+      .catch((error) => {
+        console.error(`THREE.GLTFLoader: Couldn't load texture ${index}`, error);
+        throw error;
       });
     parser.sourceCache[index] = promise;
     return promise;
@@ -312,8 +336,8 @@ async function addModels(state, models) {
   return index < 0 ? null : { error: results[index].reason, src: models[index].src };
 }
 
-/** Builds the scene for `el`. */
-async function build(el) {
+/** Starts the build of `el`. The build owns its errors. */
+function build(el) {
   const config = readScene(el, document.baseURI);
   for (const warning of config.warnings) console.warn(`autumn-plugin-three: ${warning}`);
   const state = {
@@ -340,9 +364,18 @@ async function build(el) {
   live.set(el, state);
   el.setAttribute(ATTR.state, "loading");
   if (config.aspect) el.style.aspectRatio = String(config.aspect);
-  // Markup restored from an htmx history snapshot can hold an old canvas.
+  // An htmx history snapshot can restore an old canvas. Remove it.
   for (const stale of el.querySelectorAll(`:scope > canvas[${ATTR.canvas}]`)) stale.remove();
+  populate(state, config).catch((error) => {
+    if (state.disposed) return;
+    dispose(state);
+    fail(el, error, null);
+  });
+}
 
+/** Makes the renderer, objects, and observers of a scene. */
+async function populate(state, config) {
+  const { el } = state;
   try {
     state.renderer = new THREE.WebGLRenderer({
       canvas: state.canvas,
@@ -358,6 +391,12 @@ async function build(el) {
   renderer.setClearColor(config.background ?? 0x000000, config.background === null ? 0 : 1);
   canvas.setAttribute(ATTR.canvas, "");
   canvas.setAttribute("aria-hidden", "true");
+  // The browser can drop a context (for example, too many contexts).
+  canvas.addEventListener("webglcontextlost", () => {
+    if (state.disposed) return;
+    dispose(state);
+    fail(el, new Error("WebGL context lost"), null);
+  });
   el.append(canvas);
 
   scene.add(root);
@@ -417,6 +456,7 @@ async function build(el) {
     mixers: state.mixers,
     render: () => renderNow(state),
     requestRender: () => requestRender(state),
+    update: () => updateLoop(state),
     get looping() {
       return state.looping;
     },
@@ -443,28 +483,52 @@ function scenesIn(node) {
 /** Builds every new connected scene in `node`. */
 function scan(node) {
   for (const el of scenesIn(node)) {
-    if (live.has(el) || !el.isConnected) continue;
-    build(el).catch((error) => {
-      const state = live.get(el);
-      if (state) dispose(state);
-      fail(el, error, null);
-    });
+    if (live.has(el) || parked.has(el) || !el.isConnected) continue;
+    build(el);
   }
 }
 
 /** Disposes every scene in `node` that is no longer in the document. */
 function sweep(node) {
   for (const el of scenesIn(node)) {
+    if (el.isConnected) continue;
+    parked.delete(el);
     const state = live.get(el);
-    if (state && !el.isConnected) dispose(state);
+    if (state) dispose(state);
   }
 }
 
+/** True when `node` is a mesh, model, or light declaration. */
+function isDeclaration(node) {
+  return node.nodeType === Node.ELEMENT_NODE &&
+    (node.hasAttribute(ATTR.mesh) || node.hasAttribute(ATTR.model) || node.hasAttribute(ATTR.light));
+}
+
+/** True when `record` changes the declarations or removes the canvas of a scene. */
+function changesScene(record) {
+  const el = record.target;
+  if (el.nodeType !== Node.ELEMENT_NODE || !el.matches(SCENE)) return false;
+  const canvas = live.get(el)?.canvas;
+  return [...record.addedNodes].some(isDeclaration) ||
+    [...record.removedNodes].some((node) => isDeclaration(node) || node === canvas);
+}
+
+/** Builds `el` again from its current declarations. */
+function rebuild(el) {
+  const state = live.get(el);
+  if (state) dispose(state);
+  parked.delete(el);
+  scan(el);
+}
+
 new MutationObserver((records) => {
+  const changed = new Set();
   for (const record of records) {
     for (const node of record.removedNodes) sweep(node);
     for (const node of record.addedNodes) scan(node);
+    if (changesScene(record)) changed.add(record.target);
   }
+  for (const el of changed) if (el.isConnected) rebuild(el);
 }).observe(document.documentElement, { childList: true, subtree: true });
 
 document.addEventListener("htmx:afterSwap", (event) => {
@@ -474,7 +538,9 @@ document.addEventListener("htmx:afterSwap", (event) => {
 
 document.addEventListener("htmx:beforeCleanupElement", (event) => {
   const state = live.get(event.target);
-  if (state) dispose(state);
+  if (!state) return;
+  dispose(state);
+  parked.add(event.target);
 });
 
 reducedMotion.addEventListener("change", () => {

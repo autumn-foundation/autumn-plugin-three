@@ -22,7 +22,9 @@ const MODULE_GRAPH: [&str; 3] = [CORE_JS, MODULE_JS, PARSE_JS];
 
 /// Renders the tags that load Three.js and the plugin runtime.
 ///
-/// Put it in the page `<head>`. Module scripts run after parsing, so the
+/// Put it in the page `<head>`, before any page module that imports
+/// [`THREE_MODULE_URL`](crate::THREE_MODULE_URL). Else that import loads
+/// Three.js first, without SRI. Module scripts run after parsing, so the
 /// scenes in `<body>` exist when `init.js` runs.
 ///
 /// ```rust

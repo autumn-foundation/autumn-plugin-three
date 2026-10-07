@@ -3,14 +3,14 @@
 //! A [`Scene`] renders one `<div data-three="scene">` element. Each object
 //! renders one hidden child declaration (`data-three-mesh`,
 //! `data-three-model`, `data-three-light`). `init.js` reads the markup and
-//! builds the Three.js scene. You can also write the markup by hand; the
-//! README has the attribute reference.
+//! builds the Three.js scene. You can also write the markup by hand. The
+//! README gives the attribute reference.
 //!
-//! Units: lengths in Three.js units, angles in degrees, spin and turntable
-//! speeds in degrees per second.
+//! Lengths use Three.js units. Angles use degrees. Spin and turntable
+//! speeds use degrees per second.
 //!
-//! The builder never emits a non-finite number. A setter ignores `NaN` and
-//! infinite input. Out-of-range input is clamped.
+//! The builder never writes a non-finite number. A setter ignores `NaN` and
+//! infinite input. A setter clamps input that is out of range.
 
 use autumn_web::{Markup, html};
 use maud::Render;
@@ -43,7 +43,7 @@ fn num(value: f32) -> String {
 /// assert_eq!(Vec3::from([1.0, 2.0, 3.0]), Vec3::new(1.0, 2.0, 3.0));
 /// assert_eq!(Vec3::splat(2.0), Vec3::new(2.0, 2.0, 2.0));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Vec3 {
     /// X component.
     pub x: f32,
@@ -114,7 +114,8 @@ impl Color {
     /// Black (`#000000`).
     pub const BLACK: Self = Self(0);
 
-    /// Makes a color from `0xRRGGBB`. Bits above 24 are ignored.
+    /// Makes a color from `0xRRGGBB`. The method ignores the bits above the
+    /// low 24 bits.
     #[must_use]
     pub const fn hex(value: u32) -> Self {
         Self(value & 0x00ff_ffff)
@@ -139,13 +140,20 @@ impl std::fmt::Display for Color {
     }
 }
 
+/// Smallest aspect ratio. Same as `ASPECT_RANGE` in `parse.js`.
+const ASPECT_MIN: f32 = 0.1;
+/// Largest aspect ratio. Extreme ratios break the page layout.
+const ASPECT_MAX: f32 = 10.0;
+
 /// The aspect ratio (width / height) of a scene.
 ///
 /// The named ratios have CSS rules in `three.css`, so the size is correct
 /// before JavaScript runs. `init.js` applies a [`Aspect::Ratio`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
 pub enum Aspect {
     /// 16 / 9 (default).
+    #[default]
     Wide,
     /// 4 / 3.
     Standard,
@@ -158,7 +166,7 @@ pub enum Aspect {
     /// 3 / 4.
     Portrait,
     /// A custom `width / height`. Both must be finite and positive, else
-    /// the scene uses [`Aspect::Wide`].
+    /// the scene uses [`Aspect::Wide`]. The ratio is clamped to `0.1..=10`.
     Ratio(f32, f32),
 }
 
@@ -173,7 +181,12 @@ impl Aspect {
             Self::Photo => "3/2".to_owned(),
             Self::Portrait => "3/4".to_owned(),
             Self::Ratio(w, h) if w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0 => {
-                format!("{}/{}", num(w), num(h))
+                let ratio = w / h;
+                if (ASPECT_MIN..=ASPECT_MAX).contains(&ratio) {
+                    format!("{}/{}", num(w), num(h))
+                } else {
+                    format!("{}/1", num(ratio.clamp(ASPECT_MIN, ASPECT_MAX)))
+                }
             }
             Self::Ratio(..) => Self::Wide.attr(),
         }
@@ -181,9 +194,11 @@ impl Aspect {
 }
 
 /// Camera controls.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum Controls {
     /// No user control (default).
+    #[default]
     None,
     /// Orbit: drag to rotate, wheel or pinch to zoom, right-drag to pan.
     Orbit,
@@ -204,8 +219,10 @@ impl Controls {
 
 /// Image-based scene light.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Environment {
-    /// Three.js `RoomEnvironment`: soft studio light. Good for PBR models.
+    /// Three.js `RoomEnvironment`. It gives diffuse studio light. Use it with
+    /// PBR materials and models.
     Room,
 }
 
@@ -273,6 +290,7 @@ impl Camera {
 /// A size that is not finite, or is negative, renders as the default size
 /// for that geometry.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum Geometry {
     /// A box (`box`). Default `1,1,1`.
     Box {
@@ -430,6 +448,7 @@ impl Geometry {
 
 /// A mesh material.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum Material {
     /// PBR metal/roughness (`standard`, default).
     #[default]
@@ -438,9 +457,9 @@ pub enum Material {
     Physical,
     /// No lighting (`basic`).
     Basic,
-    /// Matte, cheap lighting (`lambert`).
+    /// A matte surface (`lambert`). It uses less GPU time than PBR.
     Lambert,
-    /// Shiny, cheap lighting (`phong`).
+    /// A shiny surface (`phong`). It uses less GPU time than PBR.
     Phong,
     /// Colors from surface normals (`normal`). Needs no light.
     Normal,
@@ -513,7 +532,7 @@ macro_rules! transform_setters {
 ///     .spin([0.0, 45.0, 0.0]);
 /// # let _ = knot;
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[must_use]
 pub struct Mesh {
     geometry: Geometry,
@@ -704,10 +723,11 @@ impl Render for Mesh {
 
 /// Which animation clips of a [`Model`] play.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Clip {
     /// Play all clips (`*`).
     All,
-    /// Play the clip with this name.
+    /// Play the clip with this name. The name `*` means all clips.
     Named(String),
 }
 
@@ -720,8 +740,8 @@ pub enum Clip {
 /// # let _ = duck;
 /// ```
 ///
-/// The URL must be `http(s)` or relative. The app CSP must allow it
-/// (`connect-src`); the default allows same-origin URLs. Images inside a
+/// The URL must be `http(s)` or relative. The app CSP must allow the URL in
+/// `connect-src`. The default CSP allows same-origin URLs. Images inside a
 /// GLB work under the default CSP. Images at external URLs need `img-src`
 /// and `connect-src` to allow them.
 #[derive(Debug, Clone, PartialEq)]
@@ -744,8 +764,9 @@ impl Model {
         }
     }
 
-    /// Scales the model so its largest side is `size`, and centers it on its
-    /// position. A size that is not finite and positive is ignored.
+    /// Scales the model so that its largest side is `size`. It also puts the
+    /// model center at the model position. The method ignores a size that
+    /// is not a finite positive number.
     pub const fn fit(mut self, size: f32) -> Self {
         if size.is_finite() && size > 0.0 {
             self.fit = Some(size);
@@ -759,9 +780,15 @@ impl Model {
         self
     }
 
-    /// Plays the clip with this name in a loop.
+    /// Plays the clip with this name in a loop. The runtime trims the name,
+    /// so this method trims it too. An empty name is ignored. The name `*`
+    /// plays all clips.
     pub fn play(mut self, name: impl Into<String>) -> Self {
-        self.clip = Some(Clip::Named(name.into()));
+        let name = name.into();
+        let name = name.trim();
+        if !name.is_empty() {
+            self.clip = Some(Clip::Named(name.to_owned()));
+        }
         self
     }
 
@@ -789,6 +816,7 @@ impl Render for Model {
 
 /// The kind of a [`Light`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LightKind {
     /// Even light from all sides (`ambient`).
     Ambient,
@@ -803,6 +831,18 @@ pub enum LightKind {
 }
 
 impl LightKind {
+    /// The default position. Same as `LIGHTS` in `parse.js`.
+    #[must_use]
+    pub const fn default_position(self) -> Vec3 {
+        match self {
+            Self::Ambient => Vec3::ZERO,
+            Self::Directional => Vec3::new(3.0, 5.0, 4.0),
+            Self::Point => Vec3::new(2.0, 3.0, 2.0),
+            Self::Spot => Vec3::new(0.0, 4.0, 2.0),
+            Self::Hemisphere => Vec3::new(0.0, 1.0, 0.0),
+        }
+    }
+
     /// The `data-three-light` value.
     const fn attr(self) -> &'static str {
         match self {
@@ -894,9 +934,11 @@ impl Light {
         self
     }
 
-    /// Sets the position. Ambient and hemisphere lights ignore it.
+    /// Sets the position. Ambient lights ignore it. For a hemisphere light,
+    /// the position sets the sky direction. A non-finite component uses the
+    /// default of the kind ([`LightKind::default_position`]).
     pub fn position(mut self, position: impl Into<Vec3>) -> Self {
-        self.position = Some(position.into().finite_or(Vec3::ZERO));
+        self.position = Some(position.into().finite_or(self.kind.default_position()));
         self
     }
 }
@@ -915,6 +957,7 @@ impl Render for Light {
 
 /// One object in a [`Scene`].
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum SceneObject {
     /// A primitive mesh.
     Mesh(Mesh),
@@ -1397,6 +1440,57 @@ mod tests {
     }
 
     #[test]
+    fn light_positions_fall_back_to_per_kind_defaults() {
+        let parse = include_str!("../assets/parse.js");
+        for kind in ALL_LIGHTS {
+            let html = render(&Light::new(kind).position([f32::NAN; 3]));
+            let default = kind.default_position().attr();
+            assert!(
+                html.contains(&format!(r#"data-three-position="{default}""#)),
+                "{html}"
+            );
+            // parse.js has the same default: `position: [x, y, z]`.
+            let js = format!("position: [{}]", default.replace(',', ", "));
+            let line = parse
+                .lines()
+                .find(|l| l.contains(&format!("\"{}\": Object.freeze", kind.attr())))
+                .expect("LIGHTS entry");
+            assert!(line.contains(&js), "{line} has {js}");
+        }
+    }
+
+    #[test]
+    fn extreme_aspect_ratios_are_clamped() {
+        for (aspect, value) in [
+            (Aspect::Ratio(1.0, 1e-30), "10/1"),
+            (Aspect::Ratio(1.0, 1000.0), "0.1/1"),
+            (Aspect::Ratio(10.0, 1.0), "10/1"),
+        ] {
+            let html = render(&Scene::new().aspect(aspect));
+            assert!(
+                html.contains(&format!(r#"data-three-aspect="{value}""#)),
+                "{html}"
+            );
+        }
+    }
+
+    #[test]
+    fn clip_names_are_trimmed_and_empty_names_ignored() {
+        assert!(
+            render(&Model::gltf("/m.glb").play(" Walk ")).contains(r#"data-three-clip="Walk""#)
+        );
+        assert!(!render(&Model::gltf("/m.glb").play("  ")).contains("data-three-clip"));
+    }
+
+    #[test]
+    fn defaults_match_the_documented_defaults() {
+        assert_eq!(Aspect::default(), Aspect::Wide);
+        assert_eq!(Controls::default(), Controls::None);
+        assert_eq!(Material::default(), Material::Standard);
+        assert_eq!(Vec3::default(), Vec3::ZERO);
+    }
+
+    #[test]
     fn colors_format_as_hex() {
         assert_eq!(Color::hex(0xff12_3456).to_string(), "#123456");
         assert_eq!(Color::hex(0xff12_3456).value(), 0x0012_3456);
@@ -1449,44 +1543,142 @@ mod tests {
                 "parse.js names {name}"
             );
         }
-        let geometries = [
-            "box",
-            "sphere",
-            "plane",
-            "torus",
-            "torus-knot",
-            "cylinder",
-            "cone",
-            "capsule",
-            "icosahedron",
-            "dodecahedron",
-            "octahedron",
-            "tetrahedron",
-            "ring",
-        ];
-        let keywords = [
-            "orbit",
-            "orbit-no-zoom",
-            "none",
-            "room",
-            "animate",
-            "standard",
-            "physical",
-            "basic",
-            "lambert",
-            "phong",
-            "normal",
-            "ambient",
-            "directional",
-            "point",
-            "spot",
-            "hemisphere",
-        ];
+        let geometries: Vec<&str> = all_geometries().iter().map(Geometry::kind).collect();
+        let mut keywords: Vec<&str> = Vec::new();
+        keywords.extend(ALL_CONTROLS.map(Controls::attr));
+        keywords.extend(ALL_ENVIRONMENTS.map(Environment::attr));
+        keywords.extend(ALL_MATERIALS.map(Material::attr));
+        keywords.extend(ALL_LIGHTS.map(LightKind::attr));
+        keywords.push("animate");
         for value in geometries.iter().chain(&keywords) {
             assert!(
                 parse.contains(&format!("\"{value}\"")),
                 "parse.js knows {value}"
             );
+        }
+    }
+
+    /// Every `Controls` variant. The match fails to compile when a variant is added.
+    const ALL_CONTROLS: [Controls; 3] = [Controls::None, Controls::Orbit, Controls::OrbitNoZoom];
+    const _: fn(Controls) = |c| match c {
+        Controls::None | Controls::Orbit | Controls::OrbitNoZoom => {}
+    };
+    /// Every `Environment` variant.
+    const ALL_ENVIRONMENTS: [Environment; 1] = [Environment::Room];
+    const _: fn(Environment) = |e| match e {
+        Environment::Room => {}
+    };
+    /// Every `Material` variant.
+    const ALL_MATERIALS: [Material; 6] = [
+        Material::Standard,
+        Material::Physical,
+        Material::Basic,
+        Material::Lambert,
+        Material::Phong,
+        Material::Normal,
+    ];
+    const _: fn(Material) = |m| match m {
+        Material::Standard
+        | Material::Physical
+        | Material::Basic
+        | Material::Lambert
+        | Material::Phong
+        | Material::Normal => {}
+    };
+    /// Every `LightKind` variant.
+    const ALL_LIGHTS: [LightKind; 5] = [
+        LightKind::Ambient,
+        LightKind::Directional,
+        LightKind::Point,
+        LightKind::Spot,
+        LightKind::Hemisphere,
+    ];
+    const _: fn(LightKind) = |k| match k {
+        LightKind::Ambient
+        | LightKind::Directional
+        | LightKind::Point
+        | LightKind::Spot
+        | LightKind::Hemisphere => {}
+    };
+
+    /// One value of every `Geometry` variant.
+    fn all_geometries() -> Vec<Geometry> {
+        let geometries: Vec<Geometry> = [
+            Mesh::cube(1.0),
+            Mesh::sphere(1.0),
+            Mesh::plane(1.0, 1.0),
+            Mesh::torus(1.0, 0.2),
+            Mesh::torus_knot(1.0, 0.2),
+            Mesh::cylinder(1.0, 1.0, 1.0),
+            Mesh::cone(1.0, 1.0),
+            Mesh::capsule(1.0, 1.0),
+            Mesh::icosahedron(1.0),
+            Mesh::dodecahedron(1.0),
+            Mesh::octahedron(1.0),
+            Mesh::tetrahedron(1.0),
+            Mesh::ring(0.5, 1.0),
+        ]
+        .map(|mesh| mesh.geometry)
+        .into();
+        for g in &geometries {
+            // Fails to compile when a variant is added.
+            match g {
+                Geometry::Box { .. }
+                | Geometry::Sphere { .. }
+                | Geometry::Plane { .. }
+                | Geometry::Torus { .. }
+                | Geometry::TorusKnot { .. }
+                | Geometry::Cylinder { .. }
+                | Geometry::Cone { .. }
+                | Geometry::Capsule { .. }
+                | Geometry::Icosahedron { .. }
+                | Geometry::Dodecahedron { .. }
+                | Geometry::Octahedron { .. }
+                | Geometry::Tetrahedron { .. }
+                | Geometry::Ring { .. } => {}
+            }
+        }
+        geometries
+    }
+
+    /// True when `token` matches the parse.js `NUMBER` grammar:
+    /// `^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$` (any case).
+    fn js_number(token: &str) -> bool {
+        let body = token.strip_prefix(['+', '-']).unwrap_or(token);
+        let (mantissa, exponent) = match body.split_once(['e', 'E']) {
+            Some((m, e)) => (m, Some(e)),
+            None => (body, None),
+        };
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        let mantissa_ok = match mantissa.split_once('.') {
+            Some((int, frac)) => {
+                (digits(int) && (frac.is_empty() || digits(frac)))
+                    || (int.is_empty() && digits(frac))
+            }
+            None => digits(mantissa),
+        };
+        let exponent_ok = exponent.is_none_or(|e| digits(e.strip_prefix(['+', '-']).unwrap_or(e)));
+        mantissa_ok && exponent_ok
+    }
+
+    #[test]
+    fn js_number_matches_the_parse_js_grammar() {
+        for good in [
+            "0",
+            "-1",
+            "+2.5",
+            "3.",
+            ".5",
+            "1e5",
+            "1E-5",
+            "340282350000000000000000000000000000000",
+        ] {
+            assert!(js_number(good), "{good}");
+        }
+        for bad in [
+            "", "-", ".", "1.2.3", "NaN", "inf", "1e", "0x10", "1px", "e5",
+        ] {
+            assert!(!js_number(bad), "{bad}");
         }
     }
 
@@ -1508,10 +1700,8 @@ mod tests {
             let Some(value) = part.split('"').nth(1) else {
                 continue;
             };
-            for token in value.split([',', '/']) {
-                if token.starts_with(|c: char| c.is_ascii_digit() || c == '-') {
-                    out.push(token.to_owned());
-                }
+            if value.starts_with(|c: char| c.is_ascii_digit() || c == '-') {
+                out.extend(value.split([',', '/']).map(str::to_owned));
             }
         }
         out
@@ -1542,7 +1732,10 @@ mod tests {
             );
             prop_assert!(!html.contains("NaN"), "{}", html);
             prop_assert!(!html.contains("inf"), "{}", html);
-            for number in numbers(&html) {
+            let numbers = numbers(&html);
+            prop_assert!(numbers.len() > 20, "{:?}", numbers);
+            for number in numbers {
+                prop_assert!(js_number(&number), "parse.js reads {}", number);
                 let parsed: f32 = number.parse().map_err(|e| TestCaseError::fail(format!("{number}: {e}")))?;
                 prop_assert!(parsed.is_finite(), "{}", number);
                 prop_assert!(number != "-0", "{}", html);
@@ -1550,10 +1743,12 @@ mod tests {
         }
 
         #[test]
-        fn vec3_attr_round_trips_finite_values(x in -1.0e6_f32..1.0e6, y in -1.0e6_f32..1.0e6, z in -1.0e6_f32..1.0e6) {
+        fn vec3_attr_round_trips_finite_values(x in any::<f32>(), y in any::<f32>(), z in any::<f32>()) {
+            prop_assume!(x.is_finite() && y.is_finite() && z.is_finite());
             let attr = Vec3::new(x, y, z).attr();
             let parts: Vec<f32> = attr.split(',').map(|p| p.parse().expect("number")).collect();
-            prop_assert_eq!(parts, vec![x + 0.0, y + 0.0, z + 0.0]);
+            prop_assert_eq!(parts, vec![x, y, z]);
+            prop_assert!(attr.split(',').all(js_number), "{}", attr);
         }
 
         #[test]

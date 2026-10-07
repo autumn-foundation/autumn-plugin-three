@@ -1,4 +1,4 @@
-// Unit tests for assets/parse.js. Run: node --test tests/js
+// Unit tests for assets/parse.js. Run: npm run test:unit
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -85,6 +85,8 @@ test("parseKeyword accepts only listed values", () => {
 test("parseAspect reads w/h", () => {
   assert.equal(parseAspect("16/9"), 16 / 9);
   assert.equal(parseAspect("2.35/1"), 2.35);
+  assert.equal(parseAspect("1/1000000"), 0.1, "clamped to 0.1");
+  assert.equal(parseAspect("1000000/1"), 10, "clamped to 10");
   for (const bad of [null, "", "16", "16/0", "0/9", "-1/2", "a/b", "1/2/3"]) {
     assert.equal(parseAspect(bad), null, String(bad));
   }
@@ -287,6 +289,24 @@ test("readScene reads lights with per-kind defaults", () => {
     { type: "light", kind: "point", color: 0xff0000, ground: LIGHTS.point.ground, intensity: 0, position: [1, 2, 3] },
   ]);
   assert.match(config.warnings[0], /laser/);
+});
+
+test("readScene reads kinds in any case and wireframe only for true", () => {
+  const config = readScene(
+    el({}, [
+      el({ [ATTR.mesh]: " BOX ", [ATTR.wireframe]: "yes" }),
+      el({ [ATTR.light]: "Point" }),
+    ]),
+    BASE,
+  );
+  assert.equal(config.objects[0].kind, "box");
+  assert.equal(config.objects[0].wireframe, false);
+  assert.equal(config.objects[1].kind, "point");
+});
+
+test("readScene reads a child with two declarations as a mesh", () => {
+  const config = readScene(el({}, [el({ [ATTR.mesh]: "box", [ATTR.model]: "/m.glb" })]), BASE);
+  assert.deepEqual(config.objects.map((o) => o.type), ["mesh"]);
 });
 
 test("readScene ignores children that are not declarations", () => {

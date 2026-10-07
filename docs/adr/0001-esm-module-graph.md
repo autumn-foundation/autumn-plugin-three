@@ -27,7 +27,11 @@ Dynamic `import()` and static imports take no `integrity` attribute.
   graph (`three.core.min.js`, `three.module.min.js`, `parse.js`). The
   browser checks the bytes. The imports then use the preloaded modules.
 - Addons load on demand with `import()`, at plain URLs, without SRI. They
-  are same-origin bytes from the binary.
+  are same-origin bytes from the binary. `GLTFLoader.js` imports the two
+  utility addons statically.
+- `three_script()` must come before any page module that imports
+  `THREE_MODULE_URL`. Else that import fills the module map first, without
+  SRI.
 
 ```mermaid
 flowchart LR
@@ -40,13 +44,19 @@ flowchart LR
     I -->|"./parse.js"| P
     I -.->|"import() on demand"| A["OrbitControls.js<br/>GLTFLoader.js<br/>RoomEnvironment.js"]
     A -->|"./three.module.min.js"| M
+    A -->|"GLTFLoader: static import"| X["BufferGeometryUtils.js<br/>SkeletonUtils.js"]
+    X -->|"./three.module.min.js"| M
     U["user module"] -->|"THREE_MODULE_URL"| M
 ```
 
 ## Consequences
 
 - One Three.js instance per page. User code can extend scenes.
-- Plain URLs revalidate (`ETag`, `304`) on each page load. Hashed URLs do
-  not. This costs one round trip per module when the cache is warm.
-- Addons have no SRI. The risk is low: they are same-origin bytes.
+- The browser checks plain URLs again (`ETag`, `304`) at each page load.
+  It does not check hashed URLs. This costs one round trip per module when
+  the cache has the file.
+- Addons have no SRI. The risk is low because they are same-origin bytes.
+- During a rolling deploy, a page from version N can get plain-URL modules
+  from version N+1. The SRI check then fails, and the scenes show their
+  fallback until the page reloads.
 - No import map, so the default CSP (`script-src 'self'`) allows all tags.

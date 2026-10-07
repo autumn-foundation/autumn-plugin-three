@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Writes static/models/gem.glb and static/models/tile.glb.
+"""Writes the test and demo models in static/models/.
+
+broken.glb: the tile with an image that does not decode.
+
+tile-ext.gltf (+ tile.bin, tile.png): the tile with its image at an
+external URL. It tests the stock GLTFLoader image path.
 
 tile.glb: a 1-unit plane ("Tile") with an embedded 2x2 PNG texture, and a
 hidden copy ("Tile2") whose texture uses the same image with another
@@ -96,7 +101,7 @@ def png_2x2():
             + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
 
 
-def write_tile():
+def write_tile(path="static/models/tile.glb", png=None):
     pos = [(-0.5, -0.5, 0), (0.5, -0.5, 0), (0.5, 0.5, 0), (-0.5, 0.5, 0)]
     uv = [(0, 1), (1, 1), (1, 0), (0, 0)]
     idx = [0, 1, 2, 0, 2, 3]
@@ -104,7 +109,7 @@ def write_tile():
         b"".join(struct.pack("<3f", *p) for p in pos),
         b"".join(struct.pack("<2f", *t) for t in uv),
         b"".join(struct.pack("<H", i) for i in idx),
-        png_2x2(),
+        png if png is not None else png_2x2(),
     ]
     views, offset, binary = [], 0, b""
     for blob in blobs:
@@ -128,7 +133,7 @@ def write_tile():
         "extensionsUsed": ["KHR_materials_unlit"],
         "textures": [{"source": 0, "sampler": 0}, {"source": 0, "sampler": 1}],
         "samplers": [{"magFilter": 9728, "minFilter": 9728}, {"magFilter": 9729, "minFilter": 9729}],
-        "images": [{"bufferView": 3, "mimeType": "image/png"}],
+        "images": [{"bufferView": 3, "mimeType": "image/png", "extras": {"source": "fixture"}}],
         "accessors": [
             {"bufferView": 0, "componentType": 5126, "count": 4, "type": "VEC3", "min": [-0.5, -0.5, 0], "max": [0.5, 0.5, 0]},
             {"bufferView": 1, "componentType": 5126, "count": 4, "type": "VEC2"},
@@ -141,9 +146,57 @@ def write_tile():
     chunk_json += b" " * ((-len(chunk_json)) % 4)
     payload = (struct.pack("<I4s", len(chunk_json), b"JSON") + chunk_json
                + struct.pack("<I4s", len(binary), b"BIN\0") + binary)
-    with open("static/models/tile.glb", "wb") as f:
+    with open(path, "wb") as f:
         f.write(struct.pack("<4sII", b"glTF", 2, 12 + len(payload)) + payload)
-    print("wrote static/models/tile.glb")
+    print(f"wrote {path}")
 
 
 write_tile()
+# broken.glb: the tile with a PNG that does not decode.
+write_tile("static/models/broken.glb", b"\x89PNG\r\n\x1a\nnot a real image")
+
+
+def write_external_tile():
+    pos = [(-0.5, -0.5, 0), (0.5, -0.5, 0), (0.5, 0.5, 0), (-0.5, 0.5, 0)]
+    uv = [(0, 1), (1, 1), (1, 0), (0, 0)]
+    idx = [0, 1, 2, 0, 2, 3]
+    blobs = [
+        b"".join(struct.pack("<3f", *p) for p in pos),
+        b"".join(struct.pack("<2f", *t) for t in uv),
+        b"".join(struct.pack("<H", i) for i in idx),
+    ]
+    views, offset, binary = [], 0, b""
+    for blob in blobs:
+        pad = (-len(blob)) % 4
+        views.append({"buffer": 0, "byteOffset": offset, "byteLength": len(blob)})
+        binary += blob + b"\0" * pad
+        offset += len(blob) + pad
+    doc = {
+        "asset": {"version": "2.0", "generator": "autumn-plugin-three make_fixture_glb.py"},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"name": "Tile", "mesh": 0}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "TEXCOORD_0": 1}, "indices": 2, "material": 0}]}],
+        "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicFactor": 0.0}, "extensions": {"KHR_materials_unlit": {}}}],
+        "extensionsUsed": ["KHR_materials_unlit"],
+        "textures": [{"source": 0, "sampler": 0}],
+        "samplers": [{"magFilter": 9728, "minFilter": 9728}],
+        "images": [{"uri": "tile.png"}],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": 4, "type": "VEC3", "min": [-0.5, -0.5, 0], "max": [0.5, 0.5, 0]},
+            {"bufferView": 1, "componentType": 5126, "count": 4, "type": "VEC2"},
+            {"bufferView": 2, "componentType": 5123, "count": 6, "type": "SCALAR"},
+        ],
+        "bufferViews": views,
+        "buffers": [{"byteLength": len(binary), "uri": "tile.bin"}],
+    }
+    with open("static/models/tile-ext.gltf", "w") as f:
+        json.dump(doc, f, indent=1)
+    with open("static/models/tile.bin", "wb") as f:
+        f.write(binary)
+    with open("static/models/tile.png", "wb") as f:
+        f.write(png_2x2())
+    print("wrote static/models/tile-ext.gltf, tile.bin, tile.png")
+
+
+write_external_tile()

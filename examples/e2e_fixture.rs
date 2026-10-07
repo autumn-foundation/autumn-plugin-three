@@ -41,6 +41,9 @@ async fn main() {
             model_clip_missing,
             late_script,
             textured,
+            textured_external,
+            params,
+            broken_texture,
         ])
         .run()
         .await;
@@ -57,6 +60,7 @@ fn page(content: &Markup) -> Markup {
                 // htmx adds an inline <style> for indicators. CSP nonce mode
                 // blocks it, so turn it off.
                 meta name="htmx-config" content=r#"{"includeIndicatorStyles":false}"#;
+                link rel="stylesheet" href=(asset_url("css/fixture.css"));
                 (three_stylesheet())
                 (three_script())
                 script src=(asset_url("js/htmx.min.js")) defer {}
@@ -286,5 +290,58 @@ async fn textured() -> Markup {
             .id("scene")
             .camera(Camera::perspective().position([0.0, 0.0, 1.2]))
             .add(Model::gltf("/static/models/tile.glb")))
+    })
+}
+
+#[autumn_web::get("/textured-external")]
+async fn textured_external() -> Markup {
+    page(&html! {
+        (Scene::new()
+            .id("scene")
+            .camera(Camera::perspective().position([0.0, 0.0, 1.2]))
+            .add(Model::gltf("/static/models/tile-ext.gltf")))
+    })
+}
+
+/// Every scene, mesh, and light parameter, for value checks.
+#[autumn_web::get("/params")]
+async fn params() -> Markup {
+    page(&html! {
+        (Scene::new()
+            .id("scene")
+            .camera(
+                Camera::perspective()
+                    .fov(30.0)
+                    .position([0.0, 0.0, 5.0])
+                    .target([1.0, 0.0, 0.0]),
+            )
+            .controls(Controls::OrbitNoZoom)
+            .turntable(-90.0)
+            .add(Mesh::cube(0.5).rotation([90.0, 0.0, 0.0]).position([-1.0, 0.0, 0.0]))
+            .add(
+                Mesh::cube(0.5)
+                    .emissive(Color::hex(0x0000_ff00))
+                    .spin([30.0, 0.0, 60.0])
+                    .position([1.0, 0.0, 0.0]),
+            )
+            .add(
+                Light::directional()
+                    .color(Color::hex(0x00ff_0000))
+                    .intensity(3.0)
+                    .position([1.0, 2.0, 3.0]),
+            )
+            .add(
+                Light::hemisphere()
+                    .color(Color::hex(0x0000_00ff))
+                    .ground(Color::hex(0x0000_ff00))
+                    .intensity(0.5),
+            ))
+    })
+}
+
+#[autumn_web::get("/broken-texture")]
+async fn broken_texture() -> Markup {
+    page(&html! {
+        (Scene::new().id("scene").add(Model::gltf("/static/models/broken.glb")))
     })
 }

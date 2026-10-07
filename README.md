@@ -1,12 +1,13 @@
 # autumn-plugin-three
 
-[Three.js](https://threejs.org) 3D scenes for [Autumn](https://autumn-web.app)
-apps, with Maud + htmx ergonomics. There is no npm, no bundler, and no inline
-script. Write the scene in Rust or as HTML attributes. Scenes work in htmx
-partials.
+This plugin adds [Three.js](https://threejs.org) 3D scenes to
+[Autumn](https://autumn-web.app) apps. It works with Maud and htmx. It does
+not use npm, a bundler, or inline script. You write a scene in Rust or as
+HTML attributes. Scenes work in htmx partials.
 
-- Three.js **0.185.1** (MIT), vendored and pinned by `sha384`.
-- Requires `autumn-web` **0.8**. MSRV **1.88**.
+- The crate contains Three.js **0.185.1** (MIT license). A `sha384` hash
+  locks each vendored file.
+- The crate needs `autumn-web` **0.8** and Rust **1.88** or later.
 
 ## Quickstart
 
@@ -21,7 +22,8 @@ autumn_web::app()
     .await;
 ```
 
-Put the tags in the layout `<head>`:
+Put the tags in the layout `<head>`. Put them before your own module
+scripts:
 
 ```rust
 use autumn_plugin_three::{three_script, three_stylesheet};
@@ -61,14 +63,15 @@ use autumn_plugin_three::{Controls, Environment, Model, Scene};
     .fallback(html! { img src="/static/chair.jpg" alt="A chair"; }))
 ```
 
-`fit(size)` scales the model so its largest side is `size` and centers it.
-`play_all()` or `play("Walk")` loops animation clips.
+`fit(size)` scales the model so that its largest side is `size`. It also
+puts the model center at the model position. `play_all()` or
+`play("Walk")` plays animation clips in a loop.
 
 ## htmx
 
-The runtime scans each htmx swap. It also disposes a scene when htmx (or any
-script) removes its element, so the GPU memory and the WebGL context are
-freed:
+The runtime scans the page after each htmx swap. When htmx or a script
+removes a scene element, the runtime disposes the scene. This releases the
+GPU memory and the WebGL context.
 
 ```rust
 #[get("/shape")]
@@ -81,21 +84,25 @@ async fn shape() -> Markup {
 <button hx-get="/shape" hx-target="#gallery">Next shape</button>
 ```
 
+When a swap changes the declarations inside a scene element (for example,
+`hx-target` is the scene), the runtime builds the scene again.
+
 ## Your own JavaScript
 
-Listen for `three:ready`. The event detail is the scene handle. Register the
-listener in a script that loads before `DOMContentLoaded` (a module or
-`defer` script). A later script can read `element.autumnThree` instead.
+Listen for `three:ready`. The event detail is the scene handle. Add the
+listener in a module or `defer` script, so that it runs before
+`DOMContentLoaded`. A script that runs later can read `element.autumnThree`.
 
 ```js
 document.addEventListener("three:ready", (event) => {
   const { THREE, scene, camera, renderer, root, requestRender } = event.detail;
-  // Add objects, raycast, change materials, then:
+  // Add objects, raycast, or change materials. Then:
   requestRender();
 });
 ```
 
-Import Three.js only from the plugin URL, so you share one instance:
+Import Three.js only from the plugin URL. Then your code and the plugin
+use one Three.js instance:
 
 ```js
 import * as THREE from "/static/_plugins/three/three.module.min.js";
@@ -105,25 +112,30 @@ import * as THREE from "/static/_plugins/three/three.module.min.js";
 |---|---|
 | `THREE` | The Three.js module. |
 | `scene`, `camera`, `renderer` | The scene objects. |
-| `root` | Group that holds meshes and models. The turntable turns it. |
+| `root` | The group that holds meshes and models. The turntable turns it. |
 | `controls` | `OrbitControls`, or `null`. |
 | `models`, `mixers` | Model groups and animation mixers. |
 | `render()` | Renders one frame now. |
 | `requestRender()` | Renders one frame on the next animation frame. |
+| `update()` | Checks for motion again. Call it after you add a mixer. |
 | `looping` | `true` while the animation loop runs. |
 
 ## Attribute reference
 
-The builder renders these attributes. You can also write them by hand.
-Angles are degrees. Speeds are degrees per second. A bad value uses the
-default and the runtime logs a warning for a bad declaration.
+The builder writes these attributes. You can also write them by hand.
+Angles use degrees. Speeds use degrees per second. Colors use `#rrggbb` or
+`#rgb`.
+
+If a value is not valid, the runtime uses the default. The runtime clamps
+numbers to their range. If a mesh kind, light kind, or model URL is not
+valid, the runtime ignores the object and logs a warning.
 
 ### Scene (`data-three="scene"`)
 
 | Attribute | Values | Default |
 |---|---|---|
-| `data-three-aspect` | `16/9`, `4/3`, `1/1`, `21/9`, `3/2`, `3/4`, or any `w/h` | `16/9` |
-| `data-three-background` | `#rrggbb`, `#rgb` | transparent |
+| `data-three-aspect` | `16/9`, `4/3`, `1/1`, `21/9`, `3/2`, `3/4`, or `w/h` (clamped to `0.1`–`10`) | `16/9` |
+| `data-three-background` | color | transparent |
 | `data-three-camera` | camera position `x,y,z` | `0,1,4` |
 | `data-three-target` | look-at point `x,y,z` | `0,0,0` |
 | `data-three-fov` | degrees, `1`–`179` | `50` |
@@ -132,8 +144,9 @@ default and the runtime logs a warning for a bad declaration.
 | `data-three-turntable` | degrees per second around Y | `0` |
 | `data-three-reduced` | `animate`: keep motion for reduced-motion users | — |
 
-Child `<div data-three-fallback>`: shows without JavaScript, without WebGL,
-and when a model fails.
+Put fallback content in a child `<div data-three-fallback>`. The browser
+shows it when JavaScript or WebGL is not available, and when a model does
+not load.
 
 ### Mesh (`data-three-mesh`)
 
@@ -142,8 +155,8 @@ and when a model fails.
 | `data-three-mesh` | `box`, `sphere`, `plane`, `torus`, `torus-knot`, `cylinder`, `cone`, `capsule`, `icosahedron`, `dodecahedron`, `octahedron`, `tetrahedron`, `ring` | — |
 | `data-three-args` | sizes, comma-separated (see below) | per kind |
 | `data-three-material` | `standard`, `physical`, `basic`, `lambert`, `phong`, `normal` | `standard` |
-| `data-three-color` | `#rrggbb` | `#ffffff` |
-| `data-three-emissive` | `#rrggbb` | `#000000` |
+| `data-three-color` | color | `#ffffff` |
+| `data-three-emissive` | color | `#000000` |
 | `data-three-metalness` | `0`–`1` | `0` |
 | `data-three-roughness` | `0`–`1` | `0.5` |
 | `data-three-opacity` | `0`–`1` | `1` |
@@ -158,7 +171,7 @@ top,bottom,h (`0.5,0.5,1`) · `cone` r,h (`0.5,1`) · `capsule` r,length
 
 | Attribute | Values | Default |
 |---|---|---|
-| `data-three-model` | `.glb` / `.gltf` URL (`http(s)` or relative) | — |
+| `data-three-model` | `.glb` or `.gltf` URL (`http(s)` or relative) | — |
 | `data-three-fit` | largest side after scaling | no fit |
 | `data-three-clip` | `*` (all clips) or a clip name | none |
 
@@ -176,52 +189,65 @@ top,bottom,h (`0.5,0.5,1`) · `cone` r,h (`0.5,1`) · `capsule` r,length
 | Attribute | Values | Default |
 |---|---|---|
 | `data-three-light` | `ambient`, `directional`, `point`, `spot`, `hemisphere` | — |
-| `data-three-color` | `#rrggbb` (sky color for `hemisphere`) | `#ffffff` |
-| `data-three-ground` | `#rrggbb`, `hemisphere` only | `#444444` |
+| `data-three-color` | color (the sky color for `hemisphere`) | `#ffffff` |
+| `data-three-ground` | color, `hemisphere` only | `#444444` |
 | `data-three-intensity` | `0` or more | per kind |
-| `data-three-position` | `x,y,z` | per kind |
+| `data-three-position` | `x,y,z`. For `hemisphere`, the sky direction. | per kind |
 
-A scene with no light and no environment gets a hemisphere light and a
-directional light.
+If a scene has no light and no environment, the runtime adds a hemisphere
+light and a directional light.
 
 ### Events and states
 
 | Name | Meaning |
 |---|---|
-| `three:ready` | The scene renders. `detail` is the handle. Bubbles. |
-| `three:error` | WebGL or a model failed. `detail` is `{ error, src }`. Bubbles. |
+| `three:ready` | The scene is ready. `detail` is the handle. The event bubbles. |
+| `three:error` | WebGL, the context, or a model failed. `detail` is `{ error, src }`. The event bubbles. |
 | `data-three-state` | `loading`, `ready`, `error`, or `disposed`. The runtime sets it. |
 
 ```mermaid
 stateDiagram-v2
     [*] --> loading: scan (load, htmx swap, DOM insert)
     loading --> ready: built
-    loading --> error: no WebGL / model failed
+    loading --> error: no WebGL, or a model failed
+    ready --> error: WebGL context lost
     ready --> disposed: element removed
-    error --> disposed: element removed
+    ready --> loading: declarations changed
+    error --> loading: element inserted again, or declarations changed
     disposed --> loading: element inserted again
 ```
 
+A scene in the `error` state stays in that state. Other swaps do not
+build it again.
+
 ## Behavior
 
-- **Reduced motion.** When the user prefers reduced motion, spin, turntable,
-  and clips stop. Orbit controls still work. `animate_reduced_motion()` opts
-  a scene back in.
+- **Reduced motion.** When the user prefers reduced motion, spin,
+  turntable, and clips stop. Orbit controls continue to work. To keep
+  motion in a scene, use `animate_reduced_motion()`.
 - **Performance.** The animation loop runs only while the scene is visible
-  and has motion. A static scene renders on demand. The pixel ratio is
-  capped at 2.
+  and has motion. A static scene renders only when it changes. The runtime
+  limits the pixel ratio to 2.
 - **Accessibility.** `label("…")` sets `role="img"` and `aria-label`. The
-  canvas is `aria-hidden`.
+  canvas has `aria-hidden="true"`.
 
-## CSP
+## Security and CSP
 
-The plugin works under the default Autumn CSP and in nonce mode
-(`[security.headers.csp_nonce] enabled = true`). There is no inline script,
-no inline style, no import map, and no `eval`. Images inside a GLB work
-under the default CSP.
+- The plugin works with the default Autumn CSP and in nonce mode
+  (`[security.headers.csp_nonce] enabled = true`). It uses no inline
+  script, no inline style, no import map, and no `eval`.
+- Images inside a GLB work with the default CSP. Safari 16 and older, and
+  Firefox 97 and older, load these images from `blob:` URLs. For textured
+  models in these browsers, add `blob:` to `img-src`.
+- Do not let user content keep `data-three-*` attributes. A sanitizer that
+  keeps `data-*` attributes lets user markup start scenes and load model
+  URLs.
+- SRI covers `init.js` and the core modules (`three_script()` preloads
+  them). The addons load from the same origin without SRI. See
+  [ADR 0001](docs/adr/0001-esm-module-graph.md).
 
-htmx adds an inline `<style>` for its indicators. Nonce mode blocks it. Turn
-it off in the layout:
+htmx adds an inline `<style>` for its indicators. Nonce mode blocks this
+style. To stop the style, add this tag to the layout:
 
 ```rust
 meta name="htmx-config" content=r#"{"includeIndicatorStyles":false}"#;
@@ -230,24 +256,22 @@ meta name="htmx-config" content=r#"{"includeIndicatorStyles":false}"#;
 ## How it works
 
 - `assets/` holds the vendored files and the plugin files. `THREE_ASSETS`
-  serves them under `/static/_plugins/three/`. Hashed URLs are immutable.
-  Plain URLs revalidate.
+  serves them under `/static/_plugins/three/`. The browser keeps hashed
+  URLs in its cache. It checks plain URLs again at each page load.
 - Three.js is a set of ES modules. Module imports use plain URLs, so the
-  page, the addons, and your code share one Three.js instance.
-  `three_script()` preloads the core modules with SRI, then loads `init.js`
-  at its hashed URL with SRI. See
+  page, the addons, and your code use one Three.js instance. See
   [ADR 0001](docs/adr/0001-esm-module-graph.md).
-- The addons import the bare specifier `three`. `scripts/vendor.sh` makes the
-  imports relative. A test reverses the rewrites and checks the upstream
-  hash. See [ADR 0002](docs/adr/0002-addon-import-rewrites.md).
-- `parse.js` reads the attributes. `init.js` builds and disposes scenes. See
-  [ADR 0003](docs/adr/0003-declarative-scene-runtime.md).
+- The addons import the bare specifier `three`. `scripts/vendor.sh` makes
+  the imports relative. A test reverses the rewrites and checks the
+  upstream hash. See [ADR 0002](docs/adr/0002-addon-import-rewrites.md).
+- `parse.js` reads the attributes. `init.js` builds and disposes the
+  scenes. See [ADR 0003](docs/adr/0003-declarative-scene-runtime.md).
 
 ## Demo
 
 ```sh
 cargo run --example three_demo
-# open http://127.0.0.1:3000
+# Open http://127.0.0.1:3000
 ```
 
 ## Tests
@@ -255,23 +279,29 @@ cargo run --example three_demo
 ```sh
 cargo test                                # Rust unit, property, and doc tests
 npm ci && npm run test:unit               # parse.js (node --test)
+npx playwright install chromium           # one time
 cargo build --example e2e_fixture
 npm run test:e2e                          # Chromium + WebGL (SwiftShader)
 ```
 
-The E2E suite reads real canvas pixels. It also runs in CSP nonce mode and
-checks `init.js` line coverage (minimum 85 %).
+The E2E tests read real canvas pixels. They also run in CSP nonce mode.
+They measure strict line coverage of `init.js` (minimum 95 %).
 
 ## Limits
 
-- WebGL only. No WebGPU renderer.
-- No shadows, post-processing, or physics in the declarative layer. Use
+- The plugin uses WebGL only. It does not support the WebGPU renderer.
+- The declarative layer has no shadows, post-processing, or physics. Use
   `three:ready` for custom code.
-- Each scene has its own WebGL context. Browsers allow about 16 at a time.
-- glTF 2.0 / GLB only. No Draco, KTX2, or Meshopt compression.
+- Each scene has its own WebGL context. Browsers keep about 16 contexts.
+  When the browser drops a context, the scene shows its fallback.
+- The plugin loads only glTF 2.0 and GLB files. It does not decode Draco,
+  KTX2, or Meshopt compression.
 - External model and image URLs need a CSP that allows them.
-- Upgrading Three.js means a new plugin release (`scripts/vendor.sh`).
+- The runtime does not watch attribute changes on a live scene. Change the
+  declarations, or swap the scene.
+- To upgrade Three.js, release a new plugin version. Use
+  `scripts/vendor.sh`.
 
 ## License
 
-Apache-2.0. Three.js is MIT: see `assets/THREE-LICENSE`.
+Apache-2.0 for the plugin. Three.js is MIT: see `assets/THREE-LICENSE`.

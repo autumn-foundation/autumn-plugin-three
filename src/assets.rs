@@ -107,6 +107,7 @@ const THREE_REWRITE: (&str, &str) = (BARE_THREE, RELATIVE_THREE);
 
 /// Provenance of one vendored upstream file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct VendoredFile {
     /// Logical path in [`THREE_ASSETS`].
     pub path: &'static str,
@@ -212,8 +213,8 @@ mod tests {
 
     /// Module specifiers in `source`: static `import`/`export ... from "x"`
     /// and dynamic `import("x")`. A static `from` counts only after `}` or
-    /// on a line that starts with `import`/`export`, so text in strings
-    /// (`from "srgb-linear"`) does not count. Comment lines are skipped.
+    /// on a line that starts with `import` or `export`. Thus text in strings
+    /// (`from "srgb-linear"`) does not count. The scan skips comment lines.
     fn specifiers(source: &str) -> Vec<String> {
         let mut out = Vec::new();
         for line in source.lines() {
@@ -325,7 +326,25 @@ mod tests {
             let is_core = file.path == CORE_JS || file.path == MODULE_JS;
             assert_eq!(file.rewrites.is_empty(), is_core, "{}", file.path);
             for (upstream, served) in file.rewrites {
-                assert_ne!(upstream, served);
+                // A rewrite may only change an import specifier:
+                // `from '<spec>';` → `from './<bundled file>';`.
+                let spec = |text: &'static str| {
+                    text.strip_prefix("} ")
+                        .unwrap_or(text)
+                        .strip_prefix("from '")
+                        .and_then(|rest| rest.strip_suffix("';"))
+                        .filter(|spec| !spec.contains(['\'', ';', ' ']))
+                };
+                let from = spec(upstream).unwrap_or_else(|| panic!("{upstream:?}"));
+                let to = spec(served).unwrap_or_else(|| panic!("{served:?}"));
+                assert_ne!(from, to);
+                let target = to.strip_prefix("./").expect("relative target");
+                assert!(THREE_ASSETS.get(target).is_some(), "{target} is bundled");
+                assert_eq!(
+                    upstream.starts_with("} "),
+                    served.starts_with("} "),
+                    "same statement shape"
+                );
             }
         }
     }

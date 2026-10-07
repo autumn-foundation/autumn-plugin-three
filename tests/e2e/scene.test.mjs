@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { lineCoverage, pixel, sleep, start, waitState } from "./harness.mjs";
 
 /** Minimum line coverage of init.js over this suite. */
-const MIN_INIT_COVERAGE = 85;
+const MIN_INIT_COVERAGE = 95;
 
 let app;
 before(async () => {
@@ -26,6 +26,23 @@ async function assertClean(page) {
   assert.deepEqual(page.errors, [], "no page errors");
 }
 
+/**
+ * Waits until `fn(handle)` of `#id` is truthy. It polls from Node: the page
+ * CSP blocks the `eval` that `page.waitForFunction` needs for closures.
+ */
+async function until(page, id, fn, timeout = 10_000) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const ok = await read(page, id, (h) => h).then(
+      (h) => h !== undefined && read(page, id, fn),
+      () => false,
+    );
+    if (ok) return;
+    if (Date.now() > deadline) throw new Error(`timeout: ${fn}`);
+    await sleep(50);
+  }
+}
+
 /** Reads a value from the `autumnThree` handle of `#id`. */
 function read(page, id, fn) {
   return page.evaluate(
@@ -43,6 +60,8 @@ describe("rendering", () => {
     const [r2, g2, b2] = await pixel(page, "scene", 0.02, 0.02);
     assert.ok(r2 < 50 && g2 < 50 && b2 > 200, `corner is the blue background: ${[r2, g2, b2]}`);
     assert.deepEqual(await page.evaluate(() => window.__events), [["three:ready", "scene", null]]);
+    assert.deepEqual(await page.evaluate(() => window.__details), [true], "detail is the handle");
+    assert.equal(await read(page, "scene", (h) => h.renderer.getClearAlpha()), 1, "solid background");
     assert.equal(await page.locator("#scene > canvas").count(), 1);
     assert.equal(await page.locator("#scene > canvas").getAttribute("aria-hidden"), "true");
     assert.equal(await page.locator(".fallback").isVisible(), false, "fallback hides when ready");
@@ -164,7 +183,7 @@ describe("motion", () => {
   test("spin and turntable animate", async () => {
     const page = await app.open("/spin");
     await waitState(page, "scene", "ready");
-    await sleep(500);
+    await until(page, "scene", (h) => h.root.rotation.y > 0.2);
     const state = await read(page, "scene", (h) => ({
       looping: h.looping,
       root: h.root.rotation.y,
@@ -189,8 +208,7 @@ describe("motion", () => {
   test("a scene can opt back into motion", async () => {
     const page = await app.open("/spin-animate", { reducedMotion: "reduce" });
     await waitState(page, "scene", "ready");
-    await sleep(500);
-    assert.notEqual(await read(page, "scene", (h) => h.root.children.find((o) => o.isMesh).rotation.y), 0);
+    await until(page, "scene", (h) => h.root.children.find((o) => o.isMesh).rotation.y > 0.2);
   });
 
   test("a reduced-motion change at runtime stops the loop", async () => {
@@ -205,16 +223,13 @@ describe("motion", () => {
 
   test("off-screen and static scenes do not loop", async () => {
     const page = await app.open("/offscreen");
-    await page.evaluate(() => (document.getElementById("spacer").style.height = "3000px"));
     await waitState(page, "below", "ready");
-    await sleep(200);
-    assert.equal(await read(page, "still", (h) => h.looping), false, "static scene");
-    assert.equal(await read(page, "below", (h) => h.looping), false, "off-screen scene");
-    const angle = await read(page, "below", (h) => h.root.children[0].rotation.y);
-    await page.locator("#below").scrollIntoViewIfNeeded();
-    await page.waitForFunction(() => document.getElementById("below").autumnThree.looping === true);
     await sleep(300);
-    assert.notEqual(await read(page, "below", (h) => h.root.children[0].rotation.y), angle);
+    assert.equal(await read(page, "still", (h) => h.looping), false, "static scene");
+    assert.equal(await read(page, "below", (h) => h.looping), false, "off-screen scene never starts");
+    assert.equal(await read(page, "below", (h) => h.root.children[0].rotation.y), 0);
+    await page.locator("#below").scrollIntoViewIfNeeded();
+    await until(page, "below", (h) => h.looping && h.root.children[0].rotation.y > 0.1);
   });
 });
 
@@ -223,6 +238,7 @@ describe("controls", () => {
     const page = await app.open("/orbit");
     await waitState(page, "scene", "ready");
     const before = await read(page, "scene", (h) => h.camera.position.toArray());
+    const frames = await read(page, "scene", (h) => h.renderer.info.render.frame);
     const box = await page.locator("#scene > canvas").boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
@@ -230,7 +246,12 @@ describe("controls", () => {
     await page.mouse.up();
     const afterDrag = await read(page, "scene", (h) => h.camera.position.toArray());
     assert.notDeepEqual(afterDrag, before);
+    await until(page, "scene", new Function(`return (h) => h.renderer.info.render.frame > ${frames}`)());
     assert.equal(await read(page, "scene", (h) => h.looping), false, "no loop for controls alone");
+    const distance = await read(page, "scene", (h) => h.camera.position.length());
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 400);
+    await until(page, "scene", new Function(`return (h) => Math.abs(h.camera.position.length() - ${distance}) > 0.01`)());
     await assertClean(page);
   });
 });
@@ -272,6 +293,7 @@ describe("models", () => {
       return { distinct: a !== b, sameImage: a.image === b.image, filters: [a.magFilter, b.magFilter] };
     });
     assert.deepEqual(shared, { distinct: true, sameImage: true, filters: [1003, 1006] }, "one image, two samplers");
+    assert.equal(await read(page, "scene", (h) => h.models[0].getObjectByName("Tile").material.map.userData.source), "fixture", "image extras");
     await assertClean(page);
   });
 
@@ -282,9 +304,10 @@ describe("models", () => {
     assert.equal(events.length, 1);
     assert.equal(events[0][0], "three:error");
     assert.match(events[0][2], /missing\.glb$/);
+    assert.deepEqual(await page.evaluate(() => window.__details), [true], "detail.error is an Error");
     assert.equal(await page.locator(".fallback").isVisible(), true);
     assert.equal(await page.locator("#scene > canvas").isVisible(), false);
-    page.errors.length = 0; // The 404 is logged by the browser. That is expected.
+    page.errors.length = 0; // The browser logs the 404. This is correct.
   });
 });
 
@@ -406,13 +429,13 @@ describe("lifecycle", () => {
       document.body.appendChild(moved);
       document.getElementById("custom").remove();
     });
-    await page.waitForFunction(() => document.getElementById("square") && window.__moved);
     await sleep(200);
     const state = await page.evaluate(() => ({
       moved: document.getElementById("square").getAttribute("data-three-state"),
       same: document.getElementById("square").autumnThree?.renderer === window.__moved,
+      canvases: document.querySelectorAll("canvas").length,
     }));
-    assert.deepEqual(state, { moved: "ready", same: true });
+    assert.deepEqual(state, { moved: "ready", same: true, canvases: 1 }, "#custom is gone, #square stays");
   });
 
   test("a removed scene is disposed", async () => {
@@ -463,5 +486,209 @@ describe("lifecycle", () => {
     assert.equal(await page.locator("#restored > canvas").count(), 1);
     const [r] = await pixel(page, "restored");
     assert.ok(r > 200, "restored scene renders");
+  });
+});
+
+describe("parameters", () => {
+  test("camera, target, transform, material, and light values reach Three.js", async () => {
+    const page = await app.open("/params");
+    await waitState(page, "scene", "ready");
+    const v = await read(page, "scene", (h) => {
+      const [still, spinning] = h.root.children.filter((o) => o.isMesh);
+      const dir = new h.THREE.Vector3();
+      h.camera.getWorldDirection(dir);
+      const sun = h.scene.children.find((o) => o.isDirectionalLight);
+      const sky = h.scene.children.find((o) => o.isHemisphereLight);
+      return {
+        fov: h.camera.fov,
+        target: h.controls.target.toArray(),
+        lookAt: dir.toArray().map((n) => Math.round(n * 1000) / 1000 + 0),
+        zoom: h.controls.enableZoom,
+        alpha: h.renderer.getClearAlpha(),
+        rotationX: still.rotation.x,
+        emissive: spinning.material.emissive.getHex(),
+        sun: [sun.color.getHex(), sun.intensity, sun.position.toArray()],
+        sky: [sky.color.getHex(), sky.groundColor.getHex(), sky.intensity],
+      };
+    });
+    const expected = new Float64Array([1, 0, -5]);
+    const len = Math.hypot(...expected);
+    assert.equal(v.fov, 30);
+    assert.deepEqual(v.target, [1, 0, 0]);
+    assert.deepEqual(v.lookAt, [...expected].map((n) => Math.round((n / len) * 1000) / 1000 + 0));
+    assert.equal(v.zoom, false, "orbit-no-zoom");
+    assert.equal(v.alpha, 0, "transparent background");
+    assert.ok(Math.abs(v.rotationX - Math.PI / 2) < 1e-6, "degrees become radians");
+    assert.equal(v.emissive, 0x00ff00);
+    assert.deepEqual(v.sun, [0xff0000, 3, [1, 2, 3]]);
+    assert.deepEqual(v.sky, [0x0000ff, 0x00ff00, 0.5]);
+  });
+
+  test("spin axes and turntable direction follow the values", async () => {
+    const page = await app.open("/params");
+    await waitState(page, "scene", "ready");
+    await until(page, "scene", (h) => h.root.rotation.y < -0.3);
+    const r = await read(page, "scene", (h) => {
+      const spinning = h.root.children.filter((o) => o.isMesh)[1];
+      return { x: spinning.rotation.x, y: spinning.rotation.y, z: spinning.rotation.z, turn: h.root.rotation.y };
+    });
+    assert.ok(r.x > 0 && r.z > 0 && r.y === 0, JSON.stringify(r));
+    assert.ok(Math.abs(r.z / r.x - 2) < 0.01, `z spins twice as fast as x: ${JSON.stringify(r)}`);
+    assert.ok(r.turn < 0, "negative turntable turns clockwise");
+  });
+
+  test("orbit-no-zoom ignores the mouse wheel", async () => {
+    const page = await app.open("/params");
+    await waitState(page, "scene", "ready");
+    const before = await read(page, "scene", (h) => h.camera.position.distanceTo(h.controls.target));
+    const box = await page.locator("#scene > canvas").boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 400);
+    await sleep(200);
+    const after = await read(page, "scene", (h) => h.camera.position.distanceTo(h.controls.target));
+    assert.ok(Math.abs(after - before) < 1e-6, `${before} -> ${after}`);
+  });
+
+  test("requestRender() and update() work from custom code", async () => {
+    const page = await app.open("/basic");
+    await waitState(page, "scene", "ready");
+    const frames = await read(page, "scene", (h) => h.renderer.info.render.frame);
+    await page.evaluate(() => document.getElementById("scene").autumnThree.requestRender());
+    await until(page, "scene", new Function(`return (h) => h.renderer.info.render.frame > ${frames}`)());
+    assert.equal(await read(page, "scene", (h) => h.looping), false);
+    await page.evaluate(() => {
+      const h = document.getElementById("scene").autumnThree;
+      const { THREE } = h;
+      const track = new THREE.NumberKeyframeTrack(".rotation[y]", [0, 1], [0, Math.PI]);
+      const mixer = new THREE.AnimationMixer(h.root.children[0]);
+      mixer.clipAction(new THREE.AnimationClip("turn", 1, [track])).play();
+      h.mixers.push(mixer);
+      h.update();
+    });
+    await until(page, "scene", (h) => h.looping && h.mixers[0].time > 0);
+  });
+});
+
+describe("robustness", () => {
+  test("a failed scene stays failed when other content swaps in", async () => {
+    const page = await app.open("/model-missing");
+    await waitState(page, "scene", "error");
+    await page.evaluate(() => {
+      const detached = document.createElement("div");
+      document.body.dispatchEvent(new CustomEvent("htmx:afterSwap", { bubbles: true, detail: { target: detached } }));
+      document.body.append(document.createElement("p"));
+    });
+    await sleep(500);
+    assert.equal(await page.evaluate(() => document.getElementById("scene").getAttribute("data-three-state")), "error");
+    assert.equal((await page.evaluate(() => window.__events)).length, 1, "no second build");
+    page.errors.length = 0;
+  });
+
+  test("new children rebuild the scene", async () => {
+    const page = await app.open("/basic");
+    await waitState(page, "scene", "ready");
+    await page.evaluate(() => {
+      document.getElementById("scene").innerHTML =
+        '<div hidden data-three-mesh="box" data-three-args="2,2,2" data-three-material="basic" data-three-color="#00ff00"></div>';
+    });
+    await page.waitForFunction(() => window.__events.length === 2);
+    await waitState(page, "scene", "ready");
+    assert.equal(await page.locator("#scene > canvas").count(), 1);
+    const [r, g] = await pixel(page, "scene");
+    assert.ok(g > 200 && r < 50, `the new green box renders: ${[r, g]}`);
+    await assertClean(page);
+  });
+
+  test("a lost WebGL context shows the fallback", async () => {
+    const page = await app.open("/basic");
+    await waitState(page, "scene", "ready");
+    await page.evaluate(() => {
+      document.getElementById("scene").autumnThree.renderer.getContext().getExtension("WEBGL_lose_context").loseContext();
+    });
+    await waitState(page, "scene", "error");
+    assert.equal(await page.locator(".fallback").isVisible(), true);
+    assert.equal(await page.locator("#scene > canvas").count(), 0);
+    assert.deepEqual((await page.evaluate(() => window.__events)).map((e) => e[0]), ["three:ready", "three:error"]);
+  });
+
+  test("a failed addon import is retried by the next scene", async () => {
+    const page = await app.open("/basic");
+    await waitState(page, "scene", "ready");
+    await page.route("**/OrbitControls.js", (route) => route.abort());
+    const html = (id) =>
+      `<div id="${id}" data-three="scene" data-three-controls="orbit"><div hidden data-three-mesh="box"></div></div>`;
+    await page.evaluate((h) => document.body.insertAdjacentHTML("beforeend", h), html("first"));
+    await waitState(page, "first", "error");
+    await page.unroute("**/OrbitControls.js");
+    await page.evaluate((h) => document.body.insertAdjacentHTML("beforeend", h), html("second"));
+    await waitState(page, "second", "ready");
+    page.errors.length = 0; // The aborted request logs an error. This is correct.
+  });
+
+  for (const [name, addon, decl] of [
+    ["controls", "OrbitControls.js", 'data-three-controls="orbit"'],
+    ["environment", "RoomEnvironment.js", 'data-three-environment="room"'],
+    ["models", "GLTFLoader.js", ""],
+  ]) {
+    test(`removal while ${name} load frees the scene`, async () => {
+      const page = await app.open("/basic");
+      await waitState(page, "scene", "ready");
+      let release;
+      let requested;
+      const gate = new Promise((r) => (release = r));
+      const inFlight = new Promise((r) => (requested = r));
+      await page.route(`**/${addon}`, async (route) => {
+        requested();
+        await gate;
+        await route.continue();
+      });
+      const model = name === "models" ? '<div hidden data-three-model="/static/models/gem.glb"></div>' : "";
+      await page.evaluate(
+        (h) => document.body.insertAdjacentHTML("beforeend", h),
+        `<div id="late" data-three="scene" ${decl}><div hidden data-three-mesh="box"></div>${model}</div>`,
+      );
+      await inFlight;
+      await page.evaluate(() => {
+        window.__late = document.getElementById("late");
+        window.__late.remove();
+      });
+      release();
+      await page.waitForFunction(() => window.__late.getAttribute("data-three-state") === "disposed");
+      await sleep(300);
+      assert.equal(await page.evaluate(() => window.__late.autumnThree), undefined);
+      await assertClean(page);
+    });
+  }
+
+  test("removing scenes with controls, environment, and models frees them", async () => {
+    for (const [path, id] of [["/orbit", "scene"], ["/room", "scene"], ["/model", "scene"], ["/textured", "scene"]]) {
+      const page = await app.open(path);
+      await waitState(page, id, "ready");
+      await page.evaluate((id) => {
+        const el = document.getElementById(id);
+        window.__gone = { el, renderer: el.autumnThree.renderer };
+        el.remove();
+      }, id);
+      await page.waitForFunction(() => window.__gone.el.getAttribute("data-three-state") === "disposed");
+      assert.equal(await page.evaluate(() => window.__gone.renderer.getContext().isContextLost()), true, path);
+      await assertClean(page);
+    }
+  });
+
+  test("an embedded image that does not decode logs an error", async () => {
+    const page = await app.open("/broken-texture");
+    await waitState(page, "scene", "ready");
+    await page.waitForFunction(() => document.getElementById("scene").autumnThree.models.length === 1);
+    assert.equal(await read(page, "scene", (h) => h.models[0].getObjectByName("Tile").material.map), null);
+    assert.ok(page.errors.some((e) => /Couldn't load texture/.test(e)), page.errors.join("\n"));
+  });
+
+  test("a glTF with an external image uses the stock image path", async () => {
+    const page = await app.open("/textured-external");
+    await waitState(page, "scene", "ready");
+    await page.waitForFunction(() => document.getElementById("scene").autumnThree.models[0]?.getObjectByName("Tile")?.material.map?.image);
+    const red = await pixel(page, "scene", 0.35, 0.3);
+    assert.ok(red[0] > 200 && red[1] < 50 && red[2] < 50, `top left texel is red: ${red}`);
+    await assertClean(page);
   });
 });

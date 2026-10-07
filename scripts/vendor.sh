@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Vendor Three.js into assets/. Run from the repository root.
-# Downloads the pinned upstream files, checks their sha384, then rewrites
-# the addon import specifiers. The rewrites must stay in sync with
-# VendoredFile::rewrites in src/assets.rs.
+# The script downloads the pinned upstream files to a temp dir and checks
+# each sha384. Then it rewrites the addon import specifiers, checks that
+# each rewrite matched one line, and moves the files into assets/.
+# Keep the rewrites in sync with VendoredFile::rewrites in src/assets.rs.
+# Needs GNU sed and coreutils (base64 -w0).
 set -euo pipefail
 
 VERSION="0.185.1"
 BASE="https://cdn.jsdelivr.net/npm/three@${VERSION}"
 OUT="assets"
+TMP="$(mktemp -d)"
+trap 'rm -rf "${TMP}"' EXIT
 
 # upstream path | served name | pinned sha384
 FILES=(
@@ -22,21 +26,45 @@ FILES=(
 
 for entry in "${FILES[@]}"; do
   IFS='|' read -r upstream name pin <<<"${entry}"
-  curl -fsSL "${BASE}/${upstream}" -o "${OUT}/${name}"
-  actual="$(openssl dgst -sha384 -binary "${OUT}/${name}" | base64 -w0)"
+  curl -fsSL "${BASE}/${upstream}" -o "${TMP}/${name}"
+  actual="$(openssl dgst -sha384 -binary "${TMP}/${name}" | base64 -w0)"
   if [[ "${actual}" != "${pin}" ]]; then
     echo "sha384 mismatch: ${upstream}" >&2
     exit 1
   fi
 done
 
-# Bare `three` and `../utils/` imports do not resolve without an import
-# map. The default Autumn CSP blocks inline import maps, so make them
-# relative. See docs/adr/0002-addon-import-rewrites.md.
-for name in OrbitControls.js GLTFLoader.js BufferGeometryUtils.js SkeletonUtils.js RoomEnvironment.js; do
-  sed -i "s#^} from 'three';#} from './three.module.min.js';#" "${OUT}/${name}"
-done
-sed -i "s#^import { toTrianglesDrawMode } from '../utils/BufferGeometryUtils.js';#import { toTrianglesDrawMode } from './BufferGeometryUtils.js';#" "${OUT}/GLTFLoader.js"
-sed -i "s#^import { clone } from '../utils/SkeletonUtils.js';#import { clone } from './SkeletonUtils.js';#" "${OUT}/GLTFLoader.js"
+# rewrite FILE OLD NEW: replace one exact line. Fail unless exactly one
+# line matches before and after.
+rewrite() {
+  local file="${TMP}/$1" old="$2" new="$3"
+  if [[ "$(grep -cxF "${old}" "${file}")" != 1 ]]; then
+    echo "rewrite source not found once in $1: ${old}" >&2
+    exit 1
+  fi
+  local escaped_old escaped_new
+  escaped_old="$(printf '%s' "${old}" | sed 's/[.[\*^$/]/\\&/g')"
+  escaped_new="$(printf '%s' "${new}" | sed 's/[&/\]/\\&/g')"
+  sed -i "s/^${escaped_old}\$/${escaped_new}/" "${file}"
+  if [[ "$(grep -cxF "${new}" "${file}")" != 1 ]]; then
+    echo "rewrite failed in $1: ${new}" >&2
+    exit 1
+  fi
+}
 
+# Bare `three` and `../utils/` imports need an import map. The default
+# Autumn CSP blocks inline import maps, so make the imports relative.
+# See docs/adr/0002-addon-import-rewrites.md.
+for name in OrbitControls.js GLTFLoader.js BufferGeometryUtils.js SkeletonUtils.js RoomEnvironment.js; do
+  rewrite "${name}" "} from 'three';" "} from './three.module.min.js';"
+done
+rewrite GLTFLoader.js "import { toTrianglesDrawMode } from '../utils/BufferGeometryUtils.js';" \
+  "import { toTrianglesDrawMode } from './BufferGeometryUtils.js';"
+rewrite GLTFLoader.js "import { clone } from '../utils/SkeletonUtils.js';" \
+  "import { clone } from './SkeletonUtils.js';"
+
+for entry in "${FILES[@]}"; do
+  IFS='|' read -r _ name _ <<<"${entry}"
+  mv "${TMP}/${name}" "${OUT}/${name}"
+done
 echo "vendored three@${VERSION}"

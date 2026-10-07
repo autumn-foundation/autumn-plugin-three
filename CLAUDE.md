@@ -25,14 +25,17 @@ and comments (short sentences, active voice, simple present).
 
 ## Rules
 
-- Rust and JS stay in lockstep. A new attribute needs: builder method,
+- Keep Rust and JS in sync. A new attribute needs: builder method,
   `ATTR` entry in `parse.js`, parser test, E2E test, README row. The test
   `every_emitted_attribute_and_value_is_known_to_the_runtime` checks names.
 - The builder never emits non-finite numbers (proptest).
 - No inline script, inline style, import map, or `eval` (CSP).
 - Vendored files change only through `scripts/vendor.sh`. Update
   `VENDORED` and `assets/manifest.json` in the same commit.
-- `init.js` is embedded at compile time. Rebuild the fixture before E2E.
+- The compiler embeds `init.js`. Rebuild the fixture before you run E2E
+  tests.
+- E2E predicates: the page CSP blocks `eval`, so `page.waitForFunction`
+  with a closure fails. Use `until()` (Node-side polling) in the tests.
 
 ## Commands
 
@@ -41,11 +44,12 @@ cargo fmt && cargo clippy --all-targets -- -D warnings
 cargo test
 cargo llvm-cov --lib --fail-under-lines 85 --summary-only
 npm ci && npm run test:unit
+npx playwright install chromium   # one time
 cargo build --example e2e_fixture && npm run test:e2e
 E2E_SKIP_COVERAGE=1 node --test --test-name-pattern="<name>" tests/e2e/scene.test.mjs
 ```
 
-## Gotchas
+## Known problems
 
 - `pkill -f e2e_fixture` also matches your own shell command. Use
   `pkill -f "examples/[e]2e_fixture"`.
