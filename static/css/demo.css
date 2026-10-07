@@ -1,0 +1,65 @@
+/* Demo styles. External file: CSP nonce mode blocks inline <style>. */
+:root {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --card: #161a22;
+  --text: #e6e9ef;
+  --muted: #9aa3b2;
+  --accent: #ff7a18;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  .hero { grid-template-columns: 1fr; }
+}
+
+.kicker { color: var(--accent); font-weight: 600; margin: 0; }
+h1 { font-size: 2.4rem; line-height: 1.1; margin: 8px 0; }
+p { color: var(--muted); }
+code { color: var(--text); }
+
+.card {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 24px;
+}
+
+.card [data-three="scene"] { border-radius: 8px; }
+
+button {
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  color: #111;
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding: 8px 16px;
+}
+
+.fallback {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  margin: 0;
+}

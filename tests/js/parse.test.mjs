@@ -115,7 +115,7 @@ test("parseModelUrl allows http(s) and relative URLs only", () => {
   assert.equal(parseModelUrl("/m.glb", BASE), "https://example.test/m.glb");
   assert.equal(parseModelUrl("m.glb", BASE), "https://example.test/m.glb");
   assert.equal(parseModelUrl("http://cdn.test/a.gltf", BASE), "http://cdn.test/a.gltf");
-  for (const bad of [null, "", "   ", "javascript:alert(1)", "data:model/gltf+json,{}", "file:///etc/passwd", "blob:x"]) {
+  for (const bad of [null, "", "   ", "http://[bad", "javascript:alert(1)", "data:model/gltf+json,{}", "file:///etc/passwd", "blob:x"]) {
     assert.equal(parseModelUrl(bad, BASE), null, String(bad));
   }
 });

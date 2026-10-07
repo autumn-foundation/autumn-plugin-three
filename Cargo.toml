@@ -8,7 +8,7 @@ license = "Apache-2.0"
 repository = "https://github.com/autumn-foundation/autumn-plugin-three"
 keywords = ["autumn", "threejs", "webgl", "htmx", "plugin"]
 categories = ["web-programming", "graphics"]
-exclude = [".github/", "docs/", "tests/", "scripts/", "CLAUDE.md", "clippy.toml", "package.json", "package-lock.json"]
+exclude = [".github/", "docs/", "tests/", "scripts/", "static/", "examples/", "CLAUDE.md", "clippy.toml", "package.json", "package-lock.json"]
 
 [features]
 default = []

@@ -3,7 +3,10 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { pixel, sleep, start, waitState } from "./harness.mjs";
+import { lineCoverage, pixel, sleep, start, waitState } from "./harness.mjs";
+
+/** Minimum line coverage of init.js over this suite. */
+const MIN_INIT_COVERAGE = 85;
 
 let app;
 before(async () => {
@@ -11,6 +14,10 @@ before(async () => {
 });
 after(async () => {
   await app?.close();
+  if (process.env.E2E_SKIP_COVERAGE) return; // Filtered dev runs.
+  const init = lineCoverage("init");
+  console.log(`init.js line coverage: ${init?.percent.toFixed(1)}% (uncovered lines: ${init?.uncovered.join(", ")})`);
+  assert.ok(init && init.percent >= MIN_INIT_COVERAGE, `init.js coverage ${init?.percent} < ${MIN_INIT_COVERAGE}`);
 });
 
 /** Fails on any CSP violation or page error. */
@@ -40,6 +47,12 @@ describe("rendering", () => {
     assert.equal(await page.locator("#scene > canvas").getAttribute("aria-hidden"), "true");
     assert.equal(await page.locator(".fallback").isVisible(), false, "fallback hides when ready");
     await assertClean(page);
+  });
+
+  test("a page module after three_script() gets three:ready", async () => {
+    const page = await app.open("/basic");
+    await waitState(page, "scene", "ready");
+    assert.deepEqual(await page.evaluate(() => window.__lateReady), ["scene"]);
   });
 
   test("the handle exposes Three.js for custom code", async () => {
@@ -102,6 +115,31 @@ describe("rendering", () => {
   });
 });
 
+describe("kinds", () => {
+  test("every geometry, material, and light kind builds", async () => {
+    const page = await app.open("/kinds");
+    await waitState(page, "scene", "ready");
+    const info = await read(page, "scene", (h) => ({
+      geometries: h.root.children.map((m) => m.geometry.type),
+      materials: [...new Set(h.root.children.map((m) => m.material.type))].sort(),
+      lights: h.scene.children.filter((o) => o.isLight).map((o) => o.type).sort(),
+      ring: (({ transparent, opacity, wireframe, side }) => ({ transparent, opacity, wireframe, side }))(h.root.children[12].material),
+    }));
+    assert.deepEqual(info.geometries, [
+      "BoxGeometry", "SphereGeometry", "PlaneGeometry", "TorusGeometry", "TorusKnotGeometry",
+      "CylinderGeometry", "ConeGeometry", "CapsuleGeometry", "IcosahedronGeometry",
+      "DodecahedronGeometry", "OctahedronGeometry", "TetrahedronGeometry", "RingGeometry",
+    ]);
+    assert.deepEqual(info.materials, [
+      "MeshBasicMaterial", "MeshLambertMaterial", "MeshNormalMaterial", "MeshPhongMaterial",
+      "MeshPhysicalMaterial", "MeshStandardMaterial",
+    ]);
+    assert.deepEqual(info.lights, ["AmbientLight", "DirectionalLight", "HemisphereLight", "PointLight", "SpotLight"]);
+    assert.deepEqual(info.ring, { transparent: true, opacity: 0.5, wireframe: true, side: 2 });
+    await assertClean(page);
+  });
+});
+
 describe("lights and environment", () => {
   test("room environment, declared lights, and default lights", async () => {
     const page = await app.open("/room");
@@ -153,6 +191,16 @@ describe("motion", () => {
     await waitState(page, "scene", "ready");
     await sleep(500);
     assert.notEqual(await read(page, "scene", (h) => h.root.children.find((o) => o.isMesh).rotation.y), 0);
+  });
+
+  test("a reduced-motion change at runtime stops the loop", async () => {
+    const page = await app.open("/spin");
+    await waitState(page, "scene", "ready");
+    await page.waitForFunction(() => document.getElementById("scene").autumnThree.looping === true);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.waitForFunction(() => document.getElementById("scene").autumnThree.looping === false);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.waitForFunction(() => document.getElementById("scene").autumnThree.looping === true);
   });
 
   test("off-screen and static scenes do not loop", async () => {
@@ -207,6 +255,26 @@ describe("models", () => {
     await assertClean(page);
   });
 
+  test("a GLB with an embedded texture works under the default CSP", async () => {
+    const page = await app.open("/textured");
+    await waitState(page, "scene", "ready");
+    await page.waitForFunction(() => {
+      const map = document.getElementById("scene").autumnThree.models[0]?.getObjectByName("Tile")?.material.map;
+      return map?.image;
+    });
+    const red = await pixel(page, "scene", 0.35, 0.3);
+    const white = await pixel(page, "scene", 0.65, 0.7);
+    assert.ok(red[0] > 200 && red[1] < 50 && red[2] < 50, `top left texel is red: ${red}`);
+    assert.ok(white.slice(0, 3).every((c) => c > 200), `bottom right texel is white: ${white}`);
+    const shared = await read(page, "scene", (h) => {
+      const a = h.models[0].getObjectByName("Tile").material.map;
+      const b = h.models[0].getObjectByName("Tile2").material.map;
+      return { distinct: a !== b, sameImage: a.image === b.image, filters: [a.magFilter, b.magFilter] };
+    });
+    assert.deepEqual(shared, { distinct: true, sameImage: true, filters: [1003, 1006] }, "one image, two samplers");
+    await assertClean(page);
+  });
+
   test("a failed model shows the fallback and fires three:error", async () => {
     const page = await app.open("/model-missing");
     await waitState(page, "scene", "error");
@@ -217,6 +285,53 @@ describe("models", () => {
     assert.equal(await page.locator(".fallback").isVisible(), true);
     assert.equal(await page.locator("#scene > canvas").isVisible(), false);
     page.errors.length = 0; // The 404 is logged by the browser. That is expected.
+  });
+});
+
+describe("model edge cases", () => {
+  test("a failed model without a fallback keeps the other objects", async () => {
+    const page = await app.open("/model-no-fallback");
+    await waitState(page, "scene", "error");
+    assert.equal(await page.locator("#scene > canvas").isVisible(), true);
+    const [r] = await pixel(page, "scene");
+    assert.ok(r > 200, "the red cube still renders");
+    assert.deepEqual((await page.evaluate(() => window.__events)).map((e) => e[0]), ["three:error"]);
+  });
+
+  test("a missing clip name warns and plays nothing", async () => {
+    const page = await app.open("/model-clip-missing");
+    await waitState(page, "scene", "ready");
+    assert.equal(await read(page, "scene", (h) => h.mixers.length), 0);
+    assert.match(await page.evaluate(() => window.__warnings.join("\n")), /no clip "Nope"/);
+  });
+
+  test("a model that loads after removal is freed", async () => {
+    const page = await app.open("/basic");
+    let release;
+    let requested;
+    const gate = new Promise((r) => (release = r));
+    const inFlight = new Promise((r) => (requested = r));
+    await page.route("**/gem.glb", async (route) => {
+      requested();
+      await gate;
+      await route.continue();
+    });
+    await page.evaluate(() => {
+      document.body.insertAdjacentHTML(
+        "beforeend",
+        '<div id="slow" data-three="scene"><div hidden data-three-model="/static/models/gem.glb"></div></div>',
+      );
+    });
+    await inFlight;
+    await page.evaluate(() => {
+      window.__slow = document.getElementById("slow");
+      window.__slow.remove();
+    });
+    await page.waitForFunction(() => window.__slow.getAttribute("data-three-state") === "disposed");
+    release();
+    await sleep(500);
+    assert.equal(await page.evaluate(() => window.__slow.getAttribute("data-three-state")), "disposed");
+    await assertClean(page);
   });
 });
 
@@ -235,6 +350,22 @@ describe("progressive enhancement", () => {
     assert.equal(await page.locator("#scene > canvas").count(), 0);
     const events = await page.evaluate(() => window.__events);
     assert.deepEqual(events.map((e) => e[0]), ["three:error"]);
+  });
+
+  test("an unexpected build error shows the fallback", async () => {
+    const page = await app.open("/basic", {
+      init: () => {
+        window.ResizeObserver = class {
+          constructor() {
+            throw new Error("boom");
+          }
+        };
+      },
+    });
+    await waitState(page, "scene", "error");
+    assert.equal(await page.locator(".fallback").isVisible(), true);
+    assert.equal(await page.locator("#scene > canvas").count(), 0);
+    assert.deepEqual((await page.evaluate(() => window.__events)).map((e) => e[0]), ["three:error"]);
   });
 
   test("no JavaScript: the fallback shows and declarations stay hidden", async () => {
@@ -306,6 +437,18 @@ describe("lifecycle", () => {
     await sleep(200);
     assert.equal(await page.locator("#scene > canvas").count(), 1);
     assert.equal((await page.evaluate(() => window.__events)).length, 1);
+  });
+
+  test("init.js added after page load still scans the page", async () => {
+    const page = await app.open("/late-script");
+    await page.waitForLoadState("load");
+    await page.evaluate(() => {
+      const script = document.createElement("script");
+      script.type = "module";
+      script.src = document.body.dataset.init;
+      document.head.append(script);
+    });
+    await waitState(page, "scene", "ready");
   });
 
   test("restored markup with a stale canvas initializes again", async () => {

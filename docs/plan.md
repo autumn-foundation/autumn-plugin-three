@@ -51,7 +51,9 @@ Question: "How can we make this plugin fail?" Then invert each answer.
 | A scene initializes two times. | `data-three-init` marker. |
 | `NaN` or `Infinity` in attributes breaks the scene. | Rust: never emit non-finite numbers. JS: reject non-finite input. |
 | Bad attribute value throws and stops all scenes. | Parse defensively. Catch per scene. Show fallback. |
-| Model URL fails to load. | `three:error` event. Show fallback. Other objects stay. |
+| Model URL fails to load. | `three:error` event. With a fallback: show it and free the GPU. Without: keep the other objects. |
+| GLB textures load from `blob:` URLs; `connect-src 'self'` blocks them. | GLTFLoader plugin decodes embedded images with `createImageBitmap(blob)`. |
+| A page module registers `three:ready` after the first scan. | First scan waits for `DOMContentLoaded`. |
 | Scene has zero height. | Default `aspect-ratio: 16 / 9` in `three.css`. |
 | Animation loop runs off screen and drains battery. | `IntersectionObserver` stops the loop. Render on demand when static. |
 | High DPI screens render 9× pixels. | Pixel ratio capped at 2. |
@@ -67,13 +69,15 @@ Question: "How can we make this plugin fail?" Then invert each answer.
   Addons import the bare specifier `three`. Autumn 0.8 serves
   `PluginAssets` with hashed URLs, SRI, ETag, and Range. Default CSP:
   `script-src 'self'`, `img-src 'self' data:`, `connect-src 'self'`.
-  Compression is off by default.
+  Compression is off by default. Verus is not used: the crate has no
+  `unsafe` and no Rust state machine; proptests cover the builder
+  invariants, and E2E tests cover the JS lifecycle.
 - **Red (feelings).** Users want "a 3D thing on my page in five lines".
   A spinning model in a hero section must feel easy.
 - **Black (risks).** ESM graph and SRI: dynamic imports have no
   `integrity`. Same-origin bytes from the binary lower this risk. A
-  `modulepreload` with SRI covers the core graph. GLB textures can use
-  `blob:` URLs; the default `img-src` blocks them (document it).
+  `modulepreload` with SRI covers the core graph. GLB textures use `blob:`
+  URLs; the default `connect-src` blocks them (fixed in `init.js`).
 - **Yellow (benefits).** One crate, no build step. Typed API catches
   errors at compile time. Scenes work in htmx partials. SRI on all entry
   tags.

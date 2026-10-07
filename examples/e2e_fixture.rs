@@ -9,8 +9,8 @@
 //! Not a demo. See `examples/three_demo.rs` for the demo.
 
 use autumn_plugin_three::{
-    Aspect, Camera, Color, Controls, Environment, Light, Material, Mesh, Model, Scene, ThreePlugin,
-    three_script, three_stylesheet,
+    Aspect, Camera, Color, Controls, Environment, Light, Material, Mesh, Model, Scene,
+    THREE_ASSETS, ThreePlugin, three_script, three_stylesheet,
 };
 use autumn_web::assets::asset_url;
 use autumn_web::{Markup, html};
@@ -36,6 +36,11 @@ async fn main() {
             aspect,
             room,
             handwritten,
+            kinds,
+            model_no_fallback,
+            model_clip_missing,
+            late_script,
+            textured,
         ])
         .run()
         .await;
@@ -55,6 +60,7 @@ fn page(content: &Markup) -> Markup {
                 (three_stylesheet())
                 (three_script())
                 script src=(asset_url("js/htmx.min.js")) defer {}
+                script type="module" src=(asset_url("js/fixture-listener.js")) {}
             }
             body { (content) }
         }
@@ -199,5 +205,86 @@ async fn handwritten() -> Markup {
             div hidden data-three-light="laser" {}
             div hidden data-three-model="javascript:alert(1)" {}
         }
+    })
+}
+
+#[autumn_web::get("/kinds")]
+async fn kinds() -> Markup {
+    let materials = [
+        Material::Standard,
+        Material::Physical,
+        Material::Basic,
+        Material::Lambert,
+        Material::Phong,
+        Material::Normal,
+    ];
+    let meshes = [
+        Mesh::cube(0.5),
+        Mesh::sphere(0.3),
+        Mesh::plane(0.5, 0.5),
+        Mesh::torus(0.3, 0.1),
+        Mesh::torus_knot(0.3, 0.1),
+        Mesh::cylinder(0.2, 0.3, 0.5),
+        Mesh::cone(0.3, 0.5),
+        Mesh::capsule(0.2, 0.3),
+        Mesh::icosahedron(0.3),
+        Mesh::dodecahedron(0.3),
+        Mesh::octahedron(0.3),
+        Mesh::tetrahedron(0.3),
+        Mesh::ring(0.1, 0.3).opacity(0.5).wireframe(),
+    ];
+    let mut scene = Scene::new().id("scene");
+    for (index, mesh) in meshes.into_iter().enumerate() {
+        #[allow(clippy::cast_precision_loss)]
+        let x = index as f32 - 6.0;
+        scene = scene.add(
+            mesh.material(materials[index % materials.len()])
+                .position([x, 0.0, 0.0]),
+        );
+    }
+    page(&html! {
+        (scene
+            .add(Light::ambient())
+            .add(Light::directional())
+            .add(Light::point())
+            .add(Light::spot())
+            .add(Light::hemisphere()))
+    })
+}
+
+#[autumn_web::get("/model-no-fallback")]
+async fn model_no_fallback() -> Markup {
+    page(&html! {
+        (Scene::new().id("scene").add(red_cube()).add(Model::gltf("/static/models/missing.glb")))
+    })
+}
+
+#[autumn_web::get("/model-clip-missing")]
+async fn model_clip_missing() -> Markup {
+    page(&html! {
+        (Scene::new().id("scene").add(Model::gltf("/static/models/gem.glb").play("Nope")))
+    })
+}
+
+/// A page without `three_script()`. The test adds the entry script later.
+#[autumn_web::get("/late-script")]
+async fn late_script() -> Markup {
+    let init = THREE_ASSETS.url("init.js");
+    html! {
+        (maud::DOCTYPE)
+        html {
+            head { (three_stylesheet()) }
+            body data-init=(init) { (Scene::new().id("scene").add(red_cube())) }
+        }
+    }
+}
+
+#[autumn_web::get("/textured")]
+async fn textured() -> Markup {
+    page(&html! {
+        (Scene::new()
+            .id("scene")
+            .camera(Camera::perspective().position([0.0, 0.0, 1.2]))
+            .add(Model::gltf("/static/models/tile.glb")))
     })
 }

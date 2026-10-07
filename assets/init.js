@@ -244,6 +244,38 @@ function addModel(state, gltf, o) {
   state.root.add(wrapper);
 }
 
+/** Decode options of the stock `ImageBitmapLoader` that GLTFLoader uses. */
+const BITMAP_OPTIONS = { premultiplyAlpha: "none", colorSpaceConversion: "none" };
+
+/**
+ * GLTFLoader plugin: decodes images that a GLB embeds in a buffer view with
+ * `createImageBitmap(blob)`. The stock loader fetches them from a `blob:`
+ * URL, and the default Autumn CSP (`connect-src 'self'`) blocks that.
+ * Other images (URLs, `data:`) use the stock path. Depends on GLTFParser
+ * internals of the pinned three.js version; tests/e2e guards it.
+ */
+function blobFreeImages(parser) {
+  const stock = parser.loadImageSource.bind(parser);
+  parser.loadImageSource = (index, loader) => {
+    const source = parser.json.images[index];
+    if (source.bufferView === undefined || loader.isImageBitmapLoader !== true) return stock(index, loader);
+    const cached = parser.sourceCache[index];
+    if (cached !== undefined) return cached.then((texture) => texture.clone());
+    const promise = parser
+      .getDependency("bufferView", source.bufferView)
+      .then((view) => createImageBitmap(new Blob([view], { type: source.mimeType }), BITMAP_OPTIONS))
+      .then((bitmap) => {
+        const texture = new THREE.Texture(bitmap);
+        texture.needsUpdate = true;
+        texture.userData.mimeType = source.mimeType;
+        return texture;
+      });
+    parser.sourceCache[index] = promise;
+    return promise;
+  };
+  return { name: "autumn_blob_free_images" };
+}
+
 /** Adds image-based light from the room environment. */
 async function addRoom(state) {
   const { RoomEnvironment } = await loadRoom();
@@ -272,7 +304,7 @@ async function addModels(state, models) {
   if (models.length === 0) return null;
   const { GLTFLoader } = await loadGltf();
   if (state.disposed) return null;
-  const loader = new GLTFLoader();
+  const loader = new GLTFLoader().register(blobFreeImages);
   const results = await Promise.allSettled(
     models.map((o) => loader.loadAsync(o.src).then((gltf) => addModel(state, gltf, o))),
   );
@@ -449,4 +481,11 @@ reducedMotion.addEventListener("change", () => {
   for (const state of live.values()) if (state.ready) updateLoop(state);
 });
 
-scan(document);
+// First scan after DOMContentLoaded: then every deferred and module script
+// on the page has run, and their `three:ready` listeners exist.
+const navigation = performance.getEntriesByType?.("navigation")?.[0];
+if (document.readyState === "loading" || navigation?.domContentLoadedEventStart === 0) {
+  document.addEventListener("DOMContentLoaded", () => scan(document), { once: true });
+} else {
+  scan(document);
+}

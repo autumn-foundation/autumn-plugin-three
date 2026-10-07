@@ -720,9 +720,10 @@ pub enum Clip {
 /// # let _ = duck;
 /// ```
 ///
-/// The URL must be `http(s)` or relative, and the app CSP must allow it
-/// (`connect-src`). Embedded textures load as `blob:` images, so the
-/// default `img-src 'self' data:` must also allow `blob:`.
+/// The URL must be `http(s)` or relative. The app CSP must allow it
+/// (`connect-src`); the default allows same-origin URLs. Images inside a
+/// GLB work under the default CSP. Images at external URLs need `img-src`
+/// and `connect-src` to allow them.
 #[derive(Debug, Clone, PartialEq)]
 #[must_use]
 pub struct Model {

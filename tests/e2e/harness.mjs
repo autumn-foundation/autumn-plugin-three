@@ -40,6 +40,52 @@ async function waitForHttp(url, child, timeoutMs = 30_000) {
   throw new Error(`fixture did not start: ${url}`);
 }
 
+/**
+ * Merges V8 block coverage of plugin files. A byte counts as run when the
+ * innermost range that holds it has a count above zero, in any page.
+ */
+const coverage = new Map(); // file name → { source, run: Uint8Array }
+
+function addCoverage(entries) {
+  for (const entry of entries) {
+    const name = entry.url.match(/\/static\/_plugins\/three\/([a-z]+)(?:\.[0-9a-f]{8})?\.js$/i)?.[1];
+    if (!name || !["init", "parse"].includes(name) || !entry.source) continue;
+    const file = coverage.get(name) ?? { source: entry.source, run: new Uint8Array(entry.source.length) };
+    coverage.set(name, file);
+    const local = new Int8Array(entry.source.length).fill(-1);
+    // Outer ranges first; inner ranges overwrite them.
+    const ranges = entry.functions.flatMap((f) => f.ranges).sort((a, b) => a.startOffset - b.startOffset || b.endOffset - a.endOffset);
+    for (const r of ranges) local.fill(r.count > 0 ? 1 : 0, r.startOffset, r.endOffset);
+    local.forEach((v, i) => v === 1 && (file.run[i] = 1));
+  }
+}
+
+/** Line coverage of a plugin file: `{ percent, uncovered }`. */
+export function lineCoverage(name) {
+  const file = coverage.get(name);
+  if (!file) return null;
+  let offset = 0;
+  let code = 0;
+  const uncovered = [];
+  file.source.split("\n").forEach((line, index) => {
+    const text = line.trim();
+    const counts = text !== "" && !text.startsWith("//") && !/^[})\];,]+$/.test(text);
+    if (counts) {
+      code += 1;
+      let run = false;
+      for (let i = offset; i < offset + line.length; i += 1) {
+        if (line[i - offset] !== " " && file.run[i]) {
+          run = true;
+          break;
+        }
+      }
+      if (!run) uncovered.push(index + 1);
+    }
+    offset += line.length + 1;
+  });
+  return { percent: (100 * (code - uncovered.length)) / code, uncovered };
+}
+
 /** Records events, CSP violations, and errors in every page. */
 const RECORDER = () => {
   window.__events = [];
@@ -88,6 +134,7 @@ export async function start({ env = {}, toml = null } = {}) {
     args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--ignore-gpu-blocklist"],
   });
   const contexts = [];
+  const pages = [];
 
   /**
    * Opens `path` in a fresh context. Options: Playwright context options,
@@ -97,6 +144,10 @@ export async function start({ env = {}, toml = null } = {}) {
     const context = await browser.newContext({ viewport: { width: 800, height: 600 }, ...options });
     contexts.push(context);
     const page = await context.newPage();
+    if (options.javaScriptEnabled !== false) {
+      await page.coverage.startJSCoverage({ resetOnNavigation: false });
+      pages.push(page);
+    }
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -108,6 +159,9 @@ export async function start({ env = {}, toml = null } = {}) {
   }
 
   async function close() {
+    for (const page of pages) {
+      if (!page.isClosed()) addCoverage(await page.coverage.stopJSCoverage().catch(() => []));
+    }
     for (const context of contexts) await context.close().catch(() => {});
     await browser.close();
     child.kill();

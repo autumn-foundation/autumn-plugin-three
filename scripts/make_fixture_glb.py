@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Writes static/models/gem.glb: a test and demo model.
+"""Writes static/models/gem.glb and static/models/tile.glb.
+
+tile.glb: a 1-unit plane ("Tile") with an embedded 2x2 PNG texture, and a
+hidden copy ("Tile2") whose texture uses the same image with another
+sampler. It tests images inside a GLB and the shared-image cache.
+
+gem.glb: a test and demo model.
 
 A 4-unit box. Its node is at (10, 0, 0) with an orange PBR material and one
 animation clip, "Spin" (2 s, one turn on Y). The size and offset test
@@ -78,3 +84,66 @@ body = (struct.pack("<I4s", len(json_chunk), b"JSON") + json_chunk
 with open("static/models/gem.glb", "wb") as f:
     f.write(struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body)
 print("wrote static/models/gem.glb")
+
+
+def png_2x2():
+    """A 2x2 RGB PNG: red, green / blue, white."""
+    import zlib
+    rows = [b"\0" + bytes([255, 0, 0, 0, 255, 0]), b"\0" + bytes([0, 0, 255, 255, 255, 255])]
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
+
+
+def write_tile():
+    pos = [(-0.5, -0.5, 0), (0.5, -0.5, 0), (0.5, 0.5, 0), (-0.5, 0.5, 0)]
+    uv = [(0, 1), (1, 1), (1, 0), (0, 0)]
+    idx = [0, 1, 2, 0, 2, 3]
+    blobs = [
+        b"".join(struct.pack("<3f", *p) for p in pos),
+        b"".join(struct.pack("<2f", *t) for t in uv),
+        b"".join(struct.pack("<H", i) for i in idx),
+        png_2x2(),
+    ]
+    views, offset, binary = [], 0, b""
+    for blob in blobs:
+        pad = (-len(blob)) % 4
+        views.append({"buffer": 0, "byteOffset": offset, "byteLength": len(blob)})
+        binary += blob + b"\0" * pad
+        offset += len(blob) + pad
+    doc = {
+        "asset": {"version": "2.0", "generator": "autumn-plugin-three make_fixture_glb.py"},
+        "scene": 0,
+        "scenes": [{"nodes": [0, 1]}],
+        "nodes": [{"name": "Tile", "mesh": 0}, {"name": "Tile2", "mesh": 1, "translation": [0, 0, -5]}],
+        "meshes": [
+            {"primitives": [{"attributes": {"POSITION": 0, "TEXCOORD_0": 1}, "indices": 2, "material": 0}]},
+            {"primitives": [{"attributes": {"POSITION": 0, "TEXCOORD_0": 1}, "indices": 2, "material": 1}]},
+        ],
+        "materials": [
+            {"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicFactor": 0.0}, "extensions": {"KHR_materials_unlit": {}}},
+            {"pbrMetallicRoughness": {"baseColorTexture": {"index": 1}, "metallicFactor": 0.0}, "extensions": {"KHR_materials_unlit": {}}},
+        ],
+        "extensionsUsed": ["KHR_materials_unlit"],
+        "textures": [{"source": 0, "sampler": 0}, {"source": 0, "sampler": 1}],
+        "samplers": [{"magFilter": 9728, "minFilter": 9728}, {"magFilter": 9729, "minFilter": 9729}],
+        "images": [{"bufferView": 3, "mimeType": "image/png"}],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": 4, "type": "VEC3", "min": [-0.5, -0.5, 0], "max": [0.5, 0.5, 0]},
+            {"bufferView": 1, "componentType": 5126, "count": 4, "type": "VEC2"},
+            {"bufferView": 2, "componentType": 5123, "count": 6, "type": "SCALAR"},
+        ],
+        "bufferViews": views,
+        "buffers": [{"byteLength": len(binary)}],
+    }
+    chunk_json = json.dumps(doc, separators=(",", ":")).encode()
+    chunk_json += b" " * ((-len(chunk_json)) % 4)
+    payload = (struct.pack("<I4s", len(chunk_json), b"JSON") + chunk_json
+               + struct.pack("<I4s", len(binary), b"BIN\0") + binary)
+    with open("static/models/tile.glb", "wb") as f:
+        f.write(struct.pack("<4sII", b"glTF", 2, 12 + len(payload)) + payload)
+    print("wrote static/models/tile.glb")
+
+
+write_tile()
