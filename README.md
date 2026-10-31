@@ -7,7 +7,7 @@ HTML attributes. Scenes work in htmx partials.
 
 - The crate contains Three.js **0.185.1** (MIT license). A `sha384` hash
   locks each vendored file.
-- The crate needs `autumn-web` **0.8** and Rust **1.88** or later.
+- The crate needs `autumn-web` **0.9** and Rust **1.88** or later.
 
 ## Quickstart
 
