@@ -33,12 +33,14 @@ static SHAPE: AtomicUsize = AtomicUsize::new(0);
 
 #[autumn_web::main]
 async fn main() {
-    autumn_web::app()
-        .plugin(ThreePlugin::new())
-        .embedded_static(&STATIC)
-        .routes(autumn_web::routes![index, shape])
-        .run()
-        .await;
+    Box::pin(
+        autumn_web::app()
+            .plugin(ThreePlugin::new())
+            .embedded_static(&STATIC)
+            .routes(autumn_web::routes![index, shape])
+            .run(),
+    )
+    .await;
 }
 
 /// The page shell.

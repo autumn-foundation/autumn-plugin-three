@@ -20,33 +20,35 @@ static STATIC: autumn_web::include_dir::Dir = autumn_web::embed_static!();
 
 #[autumn_web::main]
 async fn main() {
-    autumn_web::app()
-        .plugin(ThreePlugin::new())
-        .embedded_static(&STATIC)
-        .routes(autumn_web::routes![
-            basic,
-            spin,
-            spin_animate,
-            model,
-            model_missing,
-            swap,
-            swap_next,
-            offscreen,
-            orbit,
-            aspect,
-            room,
-            handwritten,
-            kinds,
-            model_no_fallback,
-            model_clip_missing,
-            late_script,
-            textured,
-            textured_external,
-            params,
-            broken_texture,
-        ])
-        .run()
-        .await;
+    Box::pin(
+        autumn_web::app()
+            .plugin(ThreePlugin::new())
+            .embedded_static(&STATIC)
+            .routes(autumn_web::routes![
+                basic,
+                spin,
+                spin_animate,
+                model,
+                model_missing,
+                swap,
+                swap_next,
+                offscreen,
+                orbit,
+                aspect,
+                room,
+                handwritten,
+                kinds,
+                model_no_fallback,
+                model_clip_missing,
+                late_script,
+                textured,
+                textured_external,
+                params,
+                broken_texture,
+            ])
+            .run(),
+    )
+    .await;
 }
 
 /// The page shell.
