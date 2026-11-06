@@ -13,13 +13,23 @@ HTML attributes. Scenes work in htmx partials.
 
 Add the plugin:
 
-```rust
+```rust,no_run
 use autumn_plugin_three::ThreePlugin;
+use autumn_web::prelude::*;
 
-autumn_web::app()
-    .plugin(ThreePlugin::new())
-    .run()
-    .await;
+#[get("/")]
+async fn index() -> &'static str {
+    "Hello"
+}
+
+#[autumn_web::main]
+async fn main() {
+    autumn_web::app()
+        .plugin(ThreePlugin::new())
+        .routes(routes![index])
+        .run()
+        .await;
+}
 ```
 
 Put the tags in the layout `<head>`. Put them before your own module
@@ -27,11 +37,14 @@ scripts:
 
 ```rust
 use autumn_plugin_three::{three_script, three_stylesheet};
+use autumn_web::prelude::*;
 
-html! {
-    head {
-        (three_stylesheet())
-        (three_script())
+fn head() -> Markup {
+    html! {
+        head {
+            (three_stylesheet())
+            (three_script())
+        }
     }
 }
 ```
@@ -40,14 +53,17 @@ Write a scene:
 
 ```rust
 use autumn_plugin_three::{Color, Controls, Environment, Mesh, Scene};
+use autumn_web::prelude::*;
 
-html! {
-    (Scene::new()
-        .label("An orange torus knot")
-        .environment(Environment::Room)
-        .controls(Controls::OrbitNoZoom)
-        .turntable(20.0)
-        .add(Mesh::torus_knot(0.8, 0.25).color(Color::hex(0xff7a18)).metalness(0.6)))
+fn knot() -> Markup {
+    html! {
+        (Scene::new()
+            .label("An orange torus knot")
+            .environment(Environment::Room)
+            .controls(Controls::OrbitNoZoom)
+            .turntable(20.0)
+            .add(Mesh::torus_knot(0.8, 0.25).color(Color::hex(0xff7a18)).metalness(0.6)))
+    }
 }
 ```
 
@@ -55,12 +71,17 @@ html! {
 
 ```rust
 use autumn_plugin_three::{Controls, Environment, Model, Scene};
+use autumn_web::prelude::*;
 
-(Scene::new()
-    .environment(Environment::Room)
-    .controls(Controls::Orbit)
-    .add(Model::gltf("/static/models/chair.glb").fit(2.0).play_all())
-    .fallback(html! { img src="/static/chair.jpg" alt="A chair"; }))
+fn chair() -> Markup {
+    html! {
+        (Scene::new()
+            .environment(Environment::Room)
+            .controls(Controls::Orbit)
+            .add(Model::gltf("/static/models/chair.glb").fit(2.0).play_all())
+            .fallback(html! { img src="/static/chair.jpg" alt="A chair"; }))
+    }
+}
 ```
 
 `fit(size)` scales the model so that its largest side is `size`. It also
@@ -74,6 +95,9 @@ removes a scene element, the runtime disposes the scene. This releases the
 GPU memory and the WebGL context.
 
 ```rust
+use autumn_plugin_three::{Mesh, Scene};
+use autumn_web::prelude::*;
+
 #[get("/shape")]
 async fn shape() -> Markup {
     html! { (Scene::new().add(Mesh::dodecahedron(0.9).spin([0.0, 60.0, 0.0]))) }
@@ -250,7 +274,11 @@ htmx adds an inline `<style>` for its indicators. Nonce mode blocks this
 style. To stop the style, add this tag to the layout:
 
 ```rust
-meta name="htmx-config" content=r#"{"includeIndicatorStyles":false}"#;
+use autumn_web::prelude::*;
+
+fn htmx_config() -> Markup {
+    html! { meta name="htmx-config" content=r#"{"includeIndicatorStyles":false}"#; }
+}
 ```
 
 ## How it works
